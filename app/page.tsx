@@ -2,7 +2,17 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import DownloadButton from "@/components/DownloadButton";
+import HistoryPanel from "@/components/HistoryPanel";
 import { sampleReport } from "@/lib/fixtures";
+import {
+  appendVersion,
+  deleteStudent,
+  getStudent,
+  listStudents,
+  markFinal,
+  saveNewStudent,
+} from "@/lib/storage";
+import type { StoredStudent, StoredVersion } from "@/lib/storage";
 import type {
   ApiError,
   Bucket,
@@ -181,6 +191,26 @@ async function readApiError(res: Response): Promise<string> {
     // Body was not JSON; fall through to the generic message.
   }
   return `The server responded with status ${res.status}. Please try again.`;
+}
+
+function toErrorMessage(err: unknown): string {
+  return err instanceof Error && err.message.length > 0
+    ? err.message
+    : "The request could not be completed. Check your connection and try again.";
+}
+
+function makeLocalVersion(
+  description: string,
+  addedContext: string | null,
+  report: Report
+): StoredVersion {
+  return {
+    report,
+    description,
+    addedContext,
+    createdAt: new Date().toISOString(),
+    isFinal: false,
+  };
 }
 
 // ---------- small presentational components ----------
@@ -382,6 +412,18 @@ export default function Home() {
   const [genStep, setGenStep] = useState(0);
   const stepTimerRef = useRef<number | null>(null);
 
+  // Counselor workflow state: saved students, the open student, its versions.
+  const [students, setStudents] = useState<StoredStudent[]>([]);
+  const [currentStudentId, setCurrentStudentId] = useState<string | null>(null);
+  const [versions, setVersions] = useState<StoredVersion[]>([]);
+  const [versionIndex, setVersionIndex] = useState(0);
+  const [refineOpen, setRefineOpen] = useState(false);
+  const [refineText, setRefineText] = useState("");
+
+  useEffect(() => {
+    setStudents(listStudents());
+  }, []);
+
   useEffect(() => {
     return () => {
       if (stepTimerRef.current !== null) {
@@ -410,6 +452,47 @@ export default function Home() {
     };
   }, [profile, generatedAt, lists]);
 
+  function applyReport(generated: Report): void {
+    setProfile(generated.profile);
+    setGeneratedAt(generated.generatedAt);
+    setLists({
+      reach: generated.reach,
+      target: generated.target,
+      likely: generated.likely,
+    });
+  }
+
+  // Shared parse-then-report pipeline behind both generate and refine.
+  // Drives the progress steps and surfaces the parsed profile as soon as it
+  // lands; throws with a user-facing message on any failure.
+  async function runPipeline(desc: string): Promise<Report> {
+    setGenStep(0);
+    const parseRes = await fetch("/api/parse", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ description: desc } satisfies ParseRequest),
+    });
+    if (!parseRes.ok) {
+      throw new Error(await readApiError(parseRes));
+    }
+    const { profile: parsedProfile } = (await parseRes.json()) as ParseResponse;
+    setProfile(parsedProfile);
+    setGenStep(1);
+    stepTimerRef.current = window.setTimeout(() => setGenStep(2), 1800);
+
+    const reportRes = await fetch("/api/report", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile: parsedProfile } satisfies ReportRequest),
+    });
+    clearStepTimer();
+    if (!reportRes.ok) {
+      throw new Error(await readApiError(reportRes));
+    }
+    const { report: generated } = (await reportRes.json()) as ReportResponse;
+    return generated;
+  }
+
   async function handleGenerate(): Promise<void> {
     const trimmed = description.trim();
     if (trimmed.length === 0 || phase === "generating") {
@@ -420,48 +503,141 @@ export default function Home() {
     setProfile(null);
     setLists(null);
     setGeneratedAt(null);
-    setGenStep(0);
     try {
-      const parseRes = await fetch("/api/parse", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ description: trimmed } satisfies ParseRequest),
-      });
-      if (!parseRes.ok) {
-        throw new Error(await readApiError(parseRes));
+      const generated = await runPipeline(trimmed);
+      const saved = saveNewStudent(trimmed, generated);
+      if (saved !== null) {
+        setCurrentStudentId(saved.id);
+        setVersions(saved.versions);
+      } else {
+        // Storage unavailable: keep the session working in memory only.
+        setCurrentStudentId(null);
+        setVersions([makeLocalVersion(trimmed, null, generated)]);
       }
-      const { profile: parsedProfile } =
-        (await parseRes.json()) as ParseResponse;
-      setProfile(parsedProfile);
-      setGenStep(1);
-      stepTimerRef.current = window.setTimeout(() => setGenStep(2), 1800);
-
-      const reportRes = await fetch("/api/report", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profile: parsedProfile } satisfies ReportRequest),
-      });
-      clearStepTimer();
-      if (!reportRes.ok) {
-        throw new Error(await readApiError(reportRes));
-      }
-      const { report: generated } = (await reportRes.json()) as ReportResponse;
-      setProfile(generated.profile);
-      setGeneratedAt(generated.generatedAt);
-      setLists({
-        reach: generated.reach,
-        target: generated.target,
-        likely: generated.likely,
-      });
+      setVersionIndex(0);
+      setStudents(listStudents());
+      setRefineOpen(false);
+      setRefineText("");
+      applyReport(generated);
       setPhase("result");
     } catch (err) {
       clearStepTimer();
-      setError(
-        err instanceof Error && err.message.length > 0
-          ? err.message
-          : "The request could not be completed. Check your connection and try again."
-      );
+      setError(toErrorMessage(err));
       setPhase("input");
+    }
+  }
+
+  async function handleRefine(): Promise<void> {
+    const added = refineText.trim();
+    if (added.length === 0 || phase === "generating") {
+      return;
+    }
+    const latest = versions.length > 0 ? versions[versions.length - 1] : undefined;
+    const base = latest !== undefined ? latest.description : description.trim();
+    const composite = `${base}\n\nAdditional context from the counselor: ${added}`;
+    // Snapshot the displayed report so a failed refine can restore it.
+    const prevProfile = profile;
+    const prevGeneratedAt = generatedAt;
+    const prevLists = lists;
+    setPhase("generating");
+    setError(null);
+    setProfile(null);
+    setLists(null);
+    setGeneratedAt(null);
+    try {
+      const generated = await runPipeline(composite);
+      let nextVersions: StoredVersion[] | null = null;
+      if (currentStudentId !== null) {
+        const updated = appendVersion(
+          currentStudentId,
+          composite,
+          added,
+          generated
+        );
+        if (updated !== null) {
+          nextVersions = updated.versions;
+        }
+      }
+      if (nextVersions === null) {
+        // Student was evicted or storage is unavailable; keep going in memory.
+        nextVersions = [...versions, makeLocalVersion(composite, added, generated)];
+      }
+      setVersions(nextVersions);
+      setVersionIndex(nextVersions.length - 1);
+      setStudents(listStudents());
+      setRefineOpen(false);
+      setRefineText("");
+      applyReport(generated);
+      setPhase("result");
+    } catch (err) {
+      clearStepTimer();
+      setError(toErrorMessage(err));
+      setProfile(prevProfile);
+      setGeneratedAt(prevGeneratedAt);
+      setLists(prevLists);
+      setPhase("result");
+    }
+  }
+
+  function handleSelectVersion(index: number): void {
+    const version = versions[index];
+    if (version === undefined || index === versionIndex) {
+      return;
+    }
+    setVersionIndex(index);
+    applyReport(version.report);
+  }
+
+  function handleToggleFinal(index: number): void {
+    if (currentStudentId !== null) {
+      const updated = markFinal(currentStudentId, index);
+      if (updated !== null) {
+        setVersions(updated.versions);
+        setStudents(listStudents());
+        return;
+      }
+    }
+    // In-memory fallback mirrors the storage semantics: exclusive toggle.
+    setVersions((prev) =>
+      prev.map((version, i) => ({
+        ...version,
+        isFinal: i === index ? !version.isFinal : false,
+      }))
+    );
+  }
+
+  function handleOpenStudent(studentId: string): void {
+    const student = getStudent(studentId);
+    if (student === null || student.versions.length === 0) {
+      setStudents(listStudents());
+      return;
+    }
+    const finalIndex = student.versions.findIndex((version) => version.isFinal);
+    const index = finalIndex >= 0 ? finalIndex : student.versions.length - 1;
+    const version = student.versions[index];
+    if (version === undefined) {
+      return;
+    }
+    setCurrentStudentId(student.id);
+    setVersions(student.versions);
+    setVersionIndex(index);
+    setError(null);
+    setRefineOpen(false);
+    setRefineText("");
+    applyReport(version.report);
+    setPhase("result");
+  }
+
+  function handleDeleteStudent(studentId: string): void {
+    const target = students.find((student) => student.id === studentId);
+    const label = target !== undefined ? target.label : "this student";
+    if (!window.confirm(`Delete ${label} and all saved versions?`)) {
+      return;
+    }
+    deleteStudent(studentId);
+    setStudents(listStudents());
+    if (currentStudentId === studentId) {
+      setCurrentStudentId(null);
     }
   }
 
@@ -488,21 +664,29 @@ export default function Home() {
     setGeneratedAt(null);
     setLists(null);
     setGenStep(0);
+    setCurrentStudentId(null);
+    setVersions([]);
+    setVersionIndex(0);
+    setRefineOpen(false);
+    setRefineText("");
+    setStudents(listStudents());
   }
 
   function handlePreviewSample(): void {
     setError(null);
-    setProfile(sampleReport.profile);
-    setGeneratedAt(sampleReport.generatedAt);
-    setLists({
-      reach: sampleReport.reach,
-      target: sampleReport.target,
-      likely: sampleReport.likely,
-    });
+    setCurrentStudentId(null);
+    setVersions([makeLocalVersion("Sample report preview", null, sampleReport)]);
+    setVersionIndex(0);
+    setRefineOpen(false);
+    setRefineText("");
+    applyReport(sampleReport);
     setPhase("result");
   }
 
   const isDev = process.env.NODE_ENV === "development";
+  const finalVersionIndex = versions.findIndex((version) => version.isFinal);
+  const displayedVersion =
+    versionIndex < versions.length ? versions[versionIndex] : undefined;
 
   return (
     <div className="flex flex-1 flex-col">
@@ -583,6 +767,12 @@ export default function Home() {
                 Generate list
               </button>
             </div>
+
+            <HistoryPanel
+              students={students}
+              onOpen={handleOpenStudent}
+              onDelete={handleDeleteStudent}
+            />
           </div>
         )}
 
@@ -632,6 +822,102 @@ export default function Home() {
                 <DownloadButton report={report} />
               </div>
             </header>
+
+            {error !== null && (
+              <div className="mb-6">
+                <ErrorCard message={error} />
+              </div>
+            )}
+
+            {versions.length > 0 && (
+              <div className="mb-6 flex flex-wrap items-center gap-3">
+                {versions.length > 1 && (
+                  <div
+                    role="group"
+                    aria-label="Report versions"
+                    className="inline-flex items-center gap-0.5 rounded-lg border border-zinc-300 bg-surface p-0.5 shadow-sm"
+                  >
+                    {versions.map((version, index) => (
+                      <button
+                        key={`v${index + 1}`}
+                        type="button"
+                        onClick={() => handleSelectVersion(index)}
+                        aria-pressed={index === versionIndex}
+                        className={
+                          index === versionIndex
+                            ? "rounded-md bg-accent px-3 py-1 text-xs font-semibold text-white"
+                            : "rounded-md px-3 py-1 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-100"
+                        }
+                      >
+                        v{index + 1}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {finalVersionIndex >= 0 && (
+                  <span className="inline-flex items-center rounded-full bg-accent-soft px-2.5 py-1 text-xs font-medium text-accent-strong">
+                    v{finalVersionIndex + 1} marked final
+                  </span>
+                )}
+                <div className="ml-auto flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleFinal(versionIndex)}
+                    className="rounded-lg border border-zinc-300 bg-surface px-3 py-1.5 text-xs font-medium text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50"
+                  >
+                    {displayedVersion?.isFinal === true
+                      ? "Unmark final"
+                      : "Mark as final"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRefineOpen((open) => !open)}
+                    className="rounded-lg border border-zinc-300 bg-surface px-3 py-1.5 text-xs font-medium text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50"
+                  >
+                    {refineOpen ? "Close refine" : "Refine"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {refineOpen && (
+              <div className="mb-6 rounded-xl border border-zinc-200 bg-surface p-4 shadow-sm">
+                <label
+                  htmlFor="refine-context"
+                  className="mb-2 block text-sm font-medium text-zinc-700"
+                >
+                  Add more context about this student
+                </label>
+                <textarea
+                  id="refine-context"
+                  rows={3}
+                  value={refineText}
+                  onChange={(event) => setRefineText(event.target.value)}
+                  placeholder="New scores, activities, preferences, or anything else you have learned."
+                  className="w-full resize-y rounded-xl border border-zinc-300 bg-surface p-3 text-sm leading-relaxed shadow-sm outline-none transition-colors placeholder:text-zinc-400 focus:border-accent focus:ring-2 focus:ring-accent/20"
+                />
+                <div className="mt-3 flex items-center justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRefineOpen(false);
+                      setRefineText("");
+                    }}
+                    className="text-sm font-medium text-zinc-500 transition-colors hover:text-zinc-700"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRefine}
+                    disabled={refineText.trim().length === 0}
+                    className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Regenerate list
+                  </button>
+                </div>
+              </div>
+            )}
 
             <ProfileCard profile={report.profile} />
 

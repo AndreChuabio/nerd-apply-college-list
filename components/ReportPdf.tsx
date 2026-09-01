@@ -9,31 +9,32 @@ import type {
   College,
   ProgramArea,
   Report,
+  ScoreComponent,
   ScoredCollege,
   StudentProfile,
 } from "@/lib/types";
 
-// Kept in sync with the map in app/page.tsx. Duplicated on purpose: page.tsx
-// must never statically import this module, or react-pdf lands in the SSR
-// bundle.
-const PROGRAM_LABELS: Record<ProgramArea, string> = {
-  "computer-science": "Computer science",
-  engineering: "Engineering",
-  biology: "Biology",
-  "marine-biology": "Marine biology",
-  "natural-resources": "Natural resources",
-  business: "Business",
-  health: "Health",
-  psychology: "Psychology",
-  "visual-performing-arts": "Visual and performing arts",
-  mathematics: "Mathematics",
-  "physical-sciences": "Physical sciences",
-  "social-sciences": "Social sciences",
+// Prose-cased program phrases used inside sentences. Deliberately separate
+// from the display labels in app/page.tsx: these are written to sit
+// mid-sentence ("an academic interest in computer science").
+const PROGRAM_PHRASES: Record<ProgramArea, string> = {
+  "computer-science": "computer science",
+  engineering: "engineering",
+  biology: "biology",
+  "marine-biology": "marine biology",
+  "natural-resources": "natural resources",
+  business: "business",
+  health: "health",
+  psychology: "psychology",
+  "visual-performing-arts": "visual and performing arts",
+  mathematics: "mathematics",
+  "physical-sciences": "physical sciences",
+  "social-sciences": "social sciences",
   english: "English",
-  history: "History",
-  education: "Education",
-  communications: "Communications",
-  undecided: "Undecided",
+  history: "history",
+  education: "education",
+  communications: "communications",
+  undecided: "a major still to be decided",
 };
 
 const BUCKET_TITLES: Record<Bucket, string> = {
@@ -42,86 +43,142 @@ const BUCKET_TITLES: Record<Bucket, string> = {
   likely: "Likely",
 };
 
+// Short reminders repeated in each section header so the meaning travels
+// with the section onto page two.
 const BUCKET_NOTES: Record<Bucket, string> = {
-  reach: "Admission is a stretch. Apply with a strong story.",
-  target: "Profile lines up with the typical admit.",
-  likely: "Strong odds of admission. Anchor the list here.",
+  reach: "Admission is a stretch, worth one strong application",
+  target: "Your profile sits inside the typical admitted range",
+  likely: "You are above the typical admitted range",
 };
 
-function formatPercent(rate: number | null): string | null {
-  return rate === null ? null : `${Math.round(rate * 100)}% admit`;
-}
+// Plain-language guide shown once under the masthead.
+const READING_GUIDE: ReadonlyArray<{ bucket: Bucket; sentence: string }> = [
+  {
+    bucket: "reach",
+    sentence:
+      "Admission is a stretch based on the published numbers, and each one is worth a single strong, well-prepared application.",
+  },
+  {
+    bucket: "target",
+    sentence:
+      "Your profile sits inside the typical admitted range, so these schools form the core of the list.",
+  },
+  {
+    bucket: "likely",
+    sentence:
+      "You are above the typical admitted range here, which puts you in a strong position.",
+  },
+];
 
-function formatSatRange(college: College): string | null {
-  const { satReading25, satReading75, satMath25, satMath75 } = college;
-  if (
-    satReading25 === null ||
-    satReading75 === null ||
-    satMath25 === null ||
-    satMath75 === null
-  ) {
-    return null;
+// ---------- Text assembly helpers (facts from the data only) ----------
+
+function joinWithAnd(parts: string[]): string {
+  if (parts.length <= 1) {
+    return parts.join("");
   }
-  return `SAT ${satReading25 + satMath25}-${satReading75 + satMath75}`;
-}
-
-function formatNetPrice(price: number | null): string | null {
-  return price === null ? null : `$${price.toLocaleString("en-US")}/yr net`;
-}
-
-function formatUndergrads(size: number | null): string | null {
-  return size === null
-    ? null
-    : `${size.toLocaleString("en-US")} undergrads`;
-}
-
-function statsLine(college: College): string {
-  return [
-    formatPercent(college.admitRate),
-    formatSatRange(college),
-    formatNetPrice(college.avgNetPrice),
-    formatUndergrads(college.undergradSize),
-  ]
-    .filter((part): part is string => part !== null)
-    .join("   ·   ");
+  if (parts.length === 2) {
+    return `${parts[0]} and ${parts[1]}`;
+  }
+  return `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}`;
 }
 
 function profileSummary(profile: StudentProfile): string {
-  const parts: string[] = [];
+  const facts: string[] = [];
   if (profile.gpa !== null) {
-    parts.push(`${profile.gpa.toFixed(1)} GPA`);
+    facts.push(`a ${profile.gpa.toFixed(1)} GPA`);
   }
   if (profile.satTotal !== null) {
-    parts.push(`${profile.satTotal} SAT`);
+    facts.push(`a ${profile.satTotal} SAT`);
   }
   if (profile.actComposite !== null) {
-    parts.push(`${profile.actComposite} ACT`);
+    facts.push(`a ${profile.actComposite} ACT composite`);
   }
-  if (profile.interests.length > 0) {
-    parts.push(
-      profile.interests.map((area) => PROGRAM_LABELS[area]).join(", ")
-    );
+  const interests = profile.interests
+    .filter((area) => area !== "undecided")
+    .map((area) => PROGRAM_PHRASES[area]);
+  if (interests.length > 0) {
+    facts.push(`an academic interest in ${joinWithAnd(interests)}`);
+  } else if (profile.interests.includes("undecided")) {
+    facts.push("a major still to be decided");
   }
   if (profile.homeState !== null) {
-    parts.push(`${profile.homeState} resident`);
+    facts.push(`a home state of ${profile.homeState}`);
   }
-  const prefs: string[] = [];
+
+  const first =
+    facts.length > 0
+      ? `This list was built for ${
+          profile.name ?? "this student"
+        } from the profile on file: ${joinWithAnd(facts)}.`
+      : `This list was built for ${
+          profile.name ?? "this student"
+        } from the profile on file.`;
+
+  const preferences: string[] = [];
   if (profile.learningStyle === "hands-on") {
-    prefs.push("hands-on programs");
+    preferences.push("hands-on, project-driven programs");
+  } else if (profile.learningStyle === "research") {
+    preferences.push("research-driven programs");
+  } else if (profile.learningStyle === "balanced") {
+    preferences.push("programs balancing coursework and applied work");
+  }
+  if (profile.sizePreference === "small") {
+    preferences.push("smaller campuses");
+  } else if (profile.sizePreference === "medium") {
+    preferences.push("mid-sized campuses");
+  } else if (profile.sizePreference === "large") {
+    preferences.push("larger campuses");
   }
   if (profile.prefersNearHome) {
-    prefs.push("close to home");
+    preferences.push("campuses within easy reach of home");
   }
   if (profile.prefersWarmClimate) {
-    prefs.push("warm climate");
+    preferences.push("warmer locations");
   }
   if (profile.needsFinancialAid) {
-    prefs.push("financial aid a priority");
+    preferences.push("schools with strong aid and a manageable net price");
   }
-  if (prefs.length > 0) {
-    parts.push(`prefers ${prefs.join(", ")}`);
+  if (preferences.length === 0) {
+    return first;
   }
-  return parts.join("  ·  ");
+  return `${first} The matching leaned toward ${joinWithAnd(preferences)}.`;
+}
+
+// ---------- Stats line (rendered only from the college row) ----------
+
+function statsLine(college: College): string {
+  const parts: string[] = [];
+  if (college.admitRate !== null) {
+    parts.push(`Admit rate ${Math.round(college.admitRate * 100)}%`);
+  }
+  const { satReading25, satReading75, satMath25, satMath75 } = college;
+  if (
+    satReading25 !== null &&
+    satReading75 !== null &&
+    satMath25 !== null &&
+    satMath75 !== null
+  ) {
+    parts.push(
+      `SAT mid-50 ${satReading25 + satMath25}–${satReading75 + satMath75}`
+    );
+  }
+  if (college.avgNetPrice !== null) {
+    parts.push(
+      `Avg net price $${college.avgNetPrice.toLocaleString("en-US")}/yr`
+    );
+  }
+  if (college.undergradSize !== null) {
+    parts.push(`${college.undergradSize.toLocaleString("en-US")} undergrads`);
+  }
+  if (college.gradRate !== null) {
+    parts.push(`Grad rate ${Math.round(college.gradRate * 100)}%`);
+  }
+  return parts.join("   ·   ");
+}
+
+function locationLine(college: College): string {
+  const control = college.control === "public" ? "Public" : "Private";
+  return `${college.city}, ${college.state}  ·  ${control}`;
 }
 
 function formatDate(iso: string): string {
@@ -132,80 +189,157 @@ function formatDate(iso: string): string {
   });
 }
 
-const ACCENT = "#1d4ed8";
-const INK = "#1c1917";
-const MUTED = "#6b6560";
-const RULE = "#e5e2de";
+// ---------- Palette and styles ----------
+
+const NAVY = "#1A2438";
+const EMERALD = "#157A5A";
+const INK = "#26241F";
+const GRAY = "#6C675E";
+const HAIRLINE = "#DEDAD2";
 
 const styles = StyleSheet.create({
   page: {
-    paddingTop: 28,
-    paddingBottom: 34,
-    paddingHorizontal: 36,
+    paddingTop: 40,
+    paddingBottom: 64,
+    paddingHorizontal: 54,
+    backgroundColor: "#FFFFFF",
     fontFamily: "Helvetica",
+    fontSize: 8.5,
     color: INK,
-    fontSize: 8,
   },
-  brand: {
-    fontFamily: "Helvetica-Bold",
-    fontSize: 7,
-    letterSpacing: 1.6,
-    color: ACCENT,
-    textTransform: "uppercase",
+
+  // Masthead
+  mastheadBar: {
+    borderTopWidth: 2.4,
+    borderTopColor: NAVY,
   },
-  headerRow: {
+  mastheadRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "flex-end",
-    marginTop: 5,
+    alignItems: "baseline",
+    paddingTop: 7,
+    paddingBottom: 7,
+    borderBottomWidth: 0.7,
+    borderBottomColor: NAVY,
+  },
+  wordmark: {
+    fontFamily: "Times-Bold",
+    fontSize: 13,
+    letterSpacing: 3.2,
+    textTransform: "uppercase",
+    color: NAVY,
+  },
+  preparedDate: {
+    fontFamily: "Helvetica",
+    fontSize: 7,
+    letterSpacing: 1.1,
+    textTransform: "uppercase",
+    color: GRAY,
   },
   studentName: {
     fontFamily: "Times-Bold",
-    fontSize: 17,
+    fontSize: 23,
+    color: NAVY,
+    marginTop: 10,
   },
-  generatedAt: {
-    fontSize: 7.5,
-    color: MUTED,
+  framingLine: {
+    fontFamily: "Times-Italic",
+    fontSize: 9,
+    color: GRAY,
+    marginTop: 3,
   },
   summary: {
-    fontFamily: "Times-Italic",
+    fontFamily: "Helvetica",
     fontSize: 8.5,
-    color: MUTED,
-    marginTop: 4,
+    lineHeight: 1.45,
+    color: INK,
+    marginTop: 8,
   },
-  headerRule: {
-    borderBottomWidth: 1.2,
-    borderBottomColor: INK,
-    marginTop: 7,
-    marginBottom: 0,
+
+  // Reading guide
+  guide: {
+    marginTop: 10,
+    borderTopWidth: 0.7,
+    borderTopColor: HAIRLINE,
+    borderBottomWidth: 0.7,
+    borderBottomColor: HAIRLINE,
+    paddingVertical: 7,
   },
+  guideLabel: {
+    fontFamily: "Helvetica-Bold",
+    fontSize: 6.5,
+    letterSpacing: 1.6,
+    textTransform: "uppercase",
+    color: NAVY,
+    marginBottom: 4,
+  },
+  guideRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    marginTop: 2,
+  },
+  guideBand: {
+    fontFamily: "Helvetica-Bold",
+    fontSize: 6.8,
+    letterSpacing: 1,
+    textTransform: "uppercase",
+    color: EMERALD,
+    width: 46,
+    marginTop: 1,
+  },
+  guideSentence: {
+    flex: 1,
+    fontFamily: "Times-Roman",
+    fontSize: 9,
+    lineHeight: 1.25,
+    color: INK,
+  },
+
+  // Sections
   section: {
-    marginTop: 6,
+    marginTop: 10,
   },
   sectionHeader: {
     flexDirection: "row",
+    justifyContent: "space-between",
     alignItems: "baseline",
-    borderBottomWidth: 0.6,
-    borderBottomColor: RULE,
-    paddingBottom: 2,
-    marginBottom: 1,
+    borderBottomWidth: 0.9,
+    borderBottomColor: NAVY,
+    paddingBottom: 3.5,
+  },
+  sectionTitleGroup: {
+    flexDirection: "row",
+    alignItems: "baseline",
   },
   sectionTitle: {
     fontFamily: "Helvetica-Bold",
-    fontSize: 8.5,
-    letterSpacing: 1.1,
+    fontSize: 9,
+    letterSpacing: 2,
     textTransform: "uppercase",
-    color: ACCENT,
+    color: EMERALD,
   },
   sectionNote: {
-    fontSize: 6.5,
-    color: MUTED,
-    marginLeft: 8,
+    fontFamily: "Times-Italic",
+    fontSize: 8,
+    color: GRAY,
+    marginLeft: 10,
   },
+  sectionCount: {
+    fontFamily: "Helvetica",
+    fontSize: 6.8,
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+    color: GRAY,
+  },
+
+  // School rows
   schoolRow: {
-    paddingVertical: 3,
-    borderBottomWidth: 0.6,
-    borderBottomColor: RULE,
+    paddingTop: 6,
+    paddingBottom: 6,
+  },
+  schoolRowRule: {
+    borderTopWidth: 0.6,
+    borderTopColor: HAIRLINE,
   },
   schoolTopLine: {
     flexDirection: "row",
@@ -214,58 +348,150 @@ const styles = StyleSheet.create({
   },
   schoolName: {
     fontFamily: "Helvetica-Bold",
-    fontSize: 8.5,
+    fontSize: 10,
+    color: NAVY,
+    flex: 1,
+    paddingRight: 12,
   },
   schoolPlace: {
-    fontSize: 7,
-    color: MUTED,
+    fontFamily: "Helvetica",
+    fontSize: 7.2,
+    color: GRAY,
   },
   schoolStats: {
-    fontSize: 6.5,
-    color: MUTED,
-    marginTop: 1.5,
+    fontFamily: "Helvetica",
+    fontSize: 6.8,
+    letterSpacing: 0.2,
+    color: GRAY,
+    marginTop: 2.5,
   },
   rationale: {
     fontFamily: "Times-Roman",
-    fontSize: 7.5,
-    lineHeight: 1.25,
-    marginTop: 2,
-    maxLines: 2,
-    textOverflow: "ellipsis",
+    fontSize: 9,
+    lineHeight: 1.3,
+    color: INK,
+    marginTop: 3.5,
   },
+  whyBlock: {
+    marginTop: 3.5,
+    paddingLeft: 9,
+    borderLeftWidth: 0.8,
+    borderLeftColor: HAIRLINE,
+  },
+  whyLabel: {
+    fontFamily: "Helvetica-Bold",
+    fontSize: 5.8,
+    letterSpacing: 1.3,
+    textTransform: "uppercase",
+    color: GRAY,
+    marginBottom: 1.5,
+  },
+  whyRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    marginTop: 1,
+  },
+  whyMarker: {
+    fontFamily: "Helvetica",
+    fontSize: 7,
+    color: GRAY,
+    width: 8,
+  },
+  whyText: {
+    flex: 1,
+    fontFamily: "Helvetica",
+    fontSize: 7,
+    lineHeight: 1.28,
+    color: GRAY,
+  },
+  whyStrong: {
+    fontFamily: "Helvetica-Bold",
+    color: INK,
+  },
+
+  // Closing mark
+  closing: {
+    marginTop: 16,
+    alignItems: "center",
+  },
+  closingRule: {
+    width: 34,
+    borderTopWidth: 0.8,
+    borderTopColor: EMERALD,
+    marginBottom: 6,
+  },
+  closingWordmark: {
+    fontFamily: "Times-Bold",
+    fontSize: 8,
+    letterSpacing: 3,
+    textTransform: "uppercase",
+    color: EMERALD,
+  },
+
+  // Footer
   footer: {
     position: "absolute",
-    bottom: 16,
-    left: 36,
-    right: 36,
+    bottom: 30,
+    left: 54,
+    right: 54,
     flexDirection: "row",
     justifyContent: "space-between",
     borderTopWidth: 0.6,
-    borderTopColor: RULE,
-    paddingTop: 5,
+    borderTopColor: HAIRLINE,
+    paddingTop: 6,
   },
   footerText: {
+    fontFamily: "Helvetica",
     fontSize: 6.5,
-    color: MUTED,
+    color: GRAY,
   },
 });
 
-interface SchoolRowProps {
-  scored: ScoredCollege;
+// ---------- Components ----------
+
+interface WhyBulletProps {
+  component: ScoreComponent;
 }
 
-function SchoolRow({ scored }: SchoolRowProps) {
-  const { college } = scored;
+function WhyBullet({ component }: WhyBulletProps) {
   return (
-    <View style={styles.schoolRow} wrap={false}>
+    <View style={styles.whyRow}>
+      <Text style={styles.whyMarker}>{"–"}</Text>
+      <Text style={styles.whyText}>
+        <Text style={styles.whyStrong}>{component.label}</Text>
+        {"  —  "}
+        {component.detail}
+      </Text>
+    </View>
+  );
+}
+
+interface SchoolRowProps {
+  scored: ScoredCollege;
+  first: boolean;
+}
+
+function SchoolRow({ scored, first }: SchoolRowProps) {
+  const { college } = scored;
+  const rowStyle = first
+    ? styles.schoolRow
+    : [styles.schoolRow, styles.schoolRowRule];
+  return (
+    <View style={rowStyle} wrap={false}>
       <View style={styles.schoolTopLine}>
         <Text style={styles.schoolName}>{college.name}</Text>
-        <Text style={styles.schoolPlace}>
-          {college.city}, {college.state}
-        </Text>
+        <Text style={styles.schoolPlace}>{locationLine(college)}</Text>
       </View>
       <Text style={styles.schoolStats}>{statsLine(college)}</Text>
       <Text style={styles.rationale}>{scored.rationale}</Text>
+      {scored.components.length > 0 && (
+        <View style={styles.whyBlock}>
+          <Text style={styles.whyLabel}>Why this made your list</Text>
+          {scored.components.map((component, index) => (
+            <WhyBullet key={`${component.label}-${index}`} component={component} />
+          ))}
+        </View>
+      )}
     </View>
   );
 }
@@ -279,14 +505,22 @@ function BucketSection({ bucket, schools }: BucketSectionProps) {
   if (schools.length === 0) {
     return null;
   }
+  const count = schools.length === 1 ? "1 school" : `${schools.length} schools`;
   return (
     <View style={styles.section}>
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>{BUCKET_TITLES[bucket]}</Text>
-        <Text style={styles.sectionNote}>{BUCKET_NOTES[bucket]}</Text>
+      <View style={styles.sectionHeader} minPresenceAhead={96}>
+        <View style={styles.sectionTitleGroup}>
+          <Text style={styles.sectionTitle}>{BUCKET_TITLES[bucket]}</Text>
+          <Text style={styles.sectionNote}>{BUCKET_NOTES[bucket]}</Text>
+        </View>
+        <Text style={styles.sectionCount}>{count}</Text>
       </View>
-      {schools.map((scored) => (
-        <SchoolRow key={scored.college.unitId} scored={scored} />
+      {schools.map((scored, index) => (
+        <SchoolRow
+          key={scored.college.unitId}
+          scored={scored}
+          first={index === 0}
+        />
       ))}
     </View>
   );
@@ -298,31 +532,59 @@ export interface ReportPdfProps {
 
 export function ReportPdf({ report }: ReportPdfProps) {
   const generated = formatDate(report.generatedAt);
+  const studentName = report.profile.name ?? "Student college list";
   return (
     <Document
       title={`College list for ${report.profile.name ?? "student"}`}
       author="College List Builder"
     >
       <Page size="LETTER" style={styles.page}>
-        <Text style={styles.brand}>College List Builder</Text>
-        <View style={styles.headerRow}>
-          <Text style={styles.studentName}>
-            {report.profile.name ?? "Student college list"}
-          </Text>
-          <Text style={styles.generatedAt}>Generated {generated}</Text>
+        <View style={styles.mastheadBar} />
+        <View style={styles.mastheadRow}>
+          <Text style={styles.wordmark}>College List</Text>
+          <Text style={styles.preparedDate}>Prepared {generated}</Text>
         </View>
+        <Text style={styles.studentName}>{studentName}</Text>
+        <Text style={styles.framingLine}>
+          A counselor-style report on where to apply and why, drawn from this
+          profile and public College Scorecard data.
+        </Text>
         <Text style={styles.summary}>{profileSummary(report.profile)}</Text>
-        <View style={styles.headerRule} />
+
+        <View style={styles.guide}>
+          <Text style={styles.guideLabel}>How to read this list</Text>
+          {READING_GUIDE.map(({ bucket, sentence }) => (
+            <View key={bucket} style={styles.guideRow}>
+              <Text style={styles.guideBand}>{BUCKET_TITLES[bucket]}</Text>
+              <Text style={styles.guideSentence}>{sentence}</Text>
+            </View>
+          ))}
+        </View>
+
         <BucketSection bucket="reach" schools={report.reach} />
         <BucketSection bucket="target" schools={report.target} />
         <BucketSection bucket="likely" schools={report.likely} />
+
+        <View style={styles.closing} wrap={false}>
+          <View style={styles.closingRule} />
+          <Text style={styles.closingWordmark}>College List</Text>
+        </View>
+
         <View style={styles.footer} fixed>
           <Text style={styles.footerText}>
-            Data: US Dept of Education College Scorecard
+            Data: US Department of Education College Scorecard
           </Text>
-          <Text style={styles.footerText}>Generated {generated}</Text>
+          <Text
+            style={styles.footerText}
+            render={({ pageNumber, totalPages }) =>
+              `Generated ${generated}  ·  Page ${pageNumber} of ${totalPages}`
+            }
+            fixed
+          />
         </View>
       </Page>
     </Document>
   );
 }
+
+export default ReportPdf;
