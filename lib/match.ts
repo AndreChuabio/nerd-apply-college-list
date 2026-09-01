@@ -30,6 +30,10 @@ export interface MatchResult {
 
 const BUCKET_LIMIT = 4;
 const FORCED_REACH_ADMIT_RATE = 0.15;
+// Even when a student's index clears a school's mid-50 window, a school this
+// selective rejects most of its applicant pool; calling it likely overstates
+// the odds, so the label caps at target.
+const LIKELY_ADMIT_RATE_FLOOR = 0.3;
 const ACADEMIC_LABEL = "Academic fit";
 const PROGRAM_LABEL = "Program fit";
 
@@ -164,6 +168,17 @@ function decideBucket(
       };
     }
     if (index.value > window.high) {
+      // Strong scores clear the window at plenty of selective schools that
+      // still reject most applicants. Below the floor, "likely" is a promise
+      // the admit rate does not support.
+      if (rate !== null && rate < LIKELY_ADMIT_RATE_FLOOR) {
+        return {
+          bucket: "target",
+          detail: toSentence(
+            `${index.phrase} sits above its middle 50 percent range of ${rangeText}, but its ${asPercent(rate)} percent admit rate is too selective to call it likely`
+          ),
+        };
+      }
       return {
         bucket: "likely",
         detail: toSentence(`${index.phrase} sits above its middle 50 percent range of ${rangeText}`),

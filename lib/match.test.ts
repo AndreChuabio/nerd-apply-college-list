@@ -122,6 +122,25 @@ test("an admit rate under 15 percent forces reach even for a 1550 student", () =
   assert.equal(result.likely.length, 0);
 });
 
+test("a selective school stays a target even when a 1550 student clears its window", () => {
+  // Window 1240 to 1400, admit rate 22.4 percent: the score clears the window
+  // but the school still rejects most applicants, so likely would overstate it.
+  const selective = makeCollege({
+    unitId: 701,
+    name: "Selective Window College",
+    admitRate: 0.224,
+    satReading25: 620,
+    satMath25: 620,
+    satReading75: 700,
+    satMath75: 700,
+  });
+  const result = matchColleges(makeProfile({ satTotal: 1550 }), [selective]);
+  assert.deepEqual(names(result.target), ["Selective Window College"]);
+  assert.equal(result.target[0].bucket, "target");
+  assert.match(result.target[0].components[0].detail, /22 percent admit rate/);
+  assert.equal(result.likely.length, 0);
+});
+
 test("a school with no test data falls back to admit-rate banding without throwing", () => {
   const noData = makeCollege({ unitId: 301, name: "Opaque College", admitRate: 0.45 });
   const result = matchColleges(makeProfile({ satTotal: 1230 }), [noData]);

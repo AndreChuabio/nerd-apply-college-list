@@ -17,11 +17,37 @@
 import type { College, StudentProfile } from "@/lib/types";
 
 /**
- * Scaffolding numbers that describe how the data is reported rather than making
- * a claim about a school: percentile boundaries, the percent scale, the
+ * Scaffolding numbers that can describe how the data is reported rather than
+ * making a claim about a school: percentile boundaries, the percent scale, the
  * four-year graduation window, and the ten-year earnings horizon.
+ *
+ * They are only exempt in those scaffolding contexts. Outside them, "ranked
+ * 4th" or "a top 25 program" is a claim like any other and must be justified
+ * by the allowed data set.
  */
-const STRUCTURAL_NUMBERS: readonly number[] = [4, 10, 25, 50, 75, 100];
+const STRUCTURAL_NUMBERS: ReadonlySet<number> = new Set([4, 10, 25, 50, 75, 100]);
+
+/** Percent or percentile right after the number: "25th percentile", "50 percent", "100%". */
+const PERCENT_CONTEXT_AFTER = /^(?:st|nd|rd|th)?\s*(?:%|percent(?:ile)?\b)/i;
+/** A reporting window right after the number: "4-year graduation", "10-year earnings". */
+const YEAR_CONTEXT_AFTER = /^[\s-]*year\b/i;
+/** "middle 50" right before the number. */
+const MIDDLE_CONTEXT_BEFORE = /\bmiddle\s+$/i;
+
+/**
+ * Decides whether one occurrence of a structural number is scaffolding.
+ *
+ * @param value The parsed number.
+ * @param before The prose immediately preceding the number.
+ * @param after The prose immediately following the digits.
+ */
+function isScaffoldingUse(value: number, before: string, after: string): boolean {
+  if (!STRUCTURAL_NUMBERS.has(value)) return false;
+  if (PERCENT_CONTEXT_AFTER.test(after)) return true;
+  if ((value === 4 || value === 10) && YEAR_CONTEXT_AFTER.test(after)) return true;
+  if (value === 50 && MIDDLE_CONTEXT_BEFORE.test(before)) return true;
+  return false;
+}
 
 /**
  * Matches a number and an optional suffix.
@@ -36,11 +62,11 @@ function round2(value: number): number {
 }
 
 /**
- * Pulls every numeric claim out of prose.
+ * Pulls every numeric value out of a grounding detail string.
  *
- * Ordinal suffixes are stripped rather than skipped: "25th percentile" is
- * scaffolding and clears the check through STRUCTURAL_NUMBERS, while "ranked
- * 12th" is a claim and still has to justify the 12.
+ * Used only to widen the allowed set with figures the scorer already computed
+ * and showed the model. The published prose itself is scanned in place by
+ * validateRationale so each occurrence keeps its surrounding context.
  */
 function extractNumbers(prose: string): number[] {
   const found: number[] = [];
@@ -104,7 +130,7 @@ function buildAllowedNumbers(
   profile: StudentProfile,
   groundingDetails: readonly string[],
 ): Set<number> {
-  const allowed = new Set<number>(STRUCTURAL_NUMBERS);
+  const allowed = new Set<number>();
 
   allowRate(allowed, college.admitRate);
   allowRate(allowed, college.gradRate);
@@ -179,8 +205,25 @@ export function validateRationale(
   if (trimmed.includes("!")) return false;
 
   const allowed = buildAllowedNumbers(college, profile, groundingDetails);
-  for (const value of extractNumbers(trimmed)) {
-    if (!allowed.has(round2(value))) return false;
+
+  // Scanned in place rather than through extractNumbers so each occurrence
+  // keeps its context: a structural number is only exempt where the
+  // surrounding text shows it is scaffolding, not a claim.
+  NUMBER_TOKEN.lastIndex = 0;
+  for (let match = NUMBER_TOKEN.exec(trimmed); match !== null; match = NUMBER_TOKEN.exec(trimmed)) {
+    const digits = match[1].replace(/,/g, "");
+    const parsed = Number(digits);
+    if (!Number.isFinite(parsed)) continue;
+
+    const suffix = (match[2] ?? "").toLowerCase();
+    const value = suffix === "k" ? parsed * 1000 : parsed;
+    if (allowed.has(round2(value))) continue;
+
+    const before = trimmed.slice(Math.max(0, match.index - 16), match.index);
+    const after = trimmed.slice(match.index + match[1].length);
+    if (isScaffoldingUse(value, before, after)) continue;
+
+    return false;
   }
 
   return true;
@@ -204,7 +247,9 @@ const FIXTURE_COLLEGE: College = {
   satMath25: 600,
   satMath75: 710,
   satAvg: 1280,
-  actComposite25: 25,
+  // Deliberately not 25: the top-25 rejection case below must exercise the
+  // scaffolding rule, not be excused by a real data value.
+  actComposite25: 24,
   actComposite75: 31,
   actCompositeMid: 28,
   tuitionInState: 18400,
@@ -275,6 +320,16 @@ const CASES: readonly GuardrailCase[] = [
     description: "an invented ranking is rejected",
     prose: "Example State is ranked 12th nationally. That reputation carries weight.",
     expected: false,
+  },
+  {
+    description: "a structural number outside scaffolding context is rejected",
+    prose: "This is a top 25 program in the country. That standing shows in its outcomes.",
+    expected: false,
+  },
+  {
+    description: "a percentile boundary in scaffolding context is allowed",
+    prose: "Its 75th percentile SAT total is 1380. Your score approaches that mark.",
+    expected: true,
   },
   {
     description: "an exclamation mark is rejected on style",

@@ -47,13 +47,23 @@ function isStoredVersion(value: unknown): value is StoredVersion {
     return false;
   }
   const v = value as Record<string, unknown>;
+  if (typeof v.report !== "object" || v.report === null) {
+    return false;
+  }
+  // The page renders report.profile fields and maps over the three bucket
+  // arrays, so a corrupt payload missing any of them must be dropped here
+  // rather than crash the render.
+  const report = v.report as Record<string, unknown>;
   return (
     typeof v.description === "string" &&
     (v.addedContext === null || typeof v.addedContext === "string") &&
     typeof v.createdAt === "string" &&
     typeof v.isFinal === "boolean" &&
-    typeof v.report === "object" &&
-    v.report !== null
+    typeof report.profile === "object" &&
+    report.profile !== null &&
+    Array.isArray(report.reach) &&
+    Array.isArray(report.target) &&
+    Array.isArray(report.likely)
   );
 }
 

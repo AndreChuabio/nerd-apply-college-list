@@ -32,6 +32,7 @@ import type {
 const EXAMPLE_PROMPTS: string[] = [
   "I have a student named John Smith, loves programming, won the Congressional App Challenge for the state of PA, 1230 SAT, 3.5 GPA, good AP scores like a 4 on Calc BC, 5 on Comp Sci A, 3 on Human Geo. Wants schools that aren't too far from home and are more practical and hands-on.",
   "Quiet kid, really into marine biology, middling test scores but a great story. Needs financial aid. Somewhere warm would be a plus.",
+  "Junior from New Jersey, varsity soccer captain hoping to play in college, obsessed with finance and the stock market, family is worried about costs, 1350 SAT, 3.8 GPA.",
 ];
 
 const STEP_LABELS: string[] = [
@@ -305,9 +306,34 @@ function GenerationSteps({ current }: GenerationStepsProps) {
 
 interface ProfileCardProps {
   profile: StudentProfile;
+  variant?: "card" | "rail";
 }
 
-function ProfileCard({ profile }: ProfileCardProps) {
+function ProfileCard({ profile, variant = "card" }: ProfileCardProps) {
+  if (variant === "rail") {
+    return (
+      <section aria-label="Parsed student profile">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-faint">
+          Parsed profile
+        </p>
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {profileChips(profile).map((chip) => (
+            <span
+              key={chip}
+              className="inline-flex items-center rounded-full bg-accent-soft px-2.5 py-1 text-xs font-medium tabular-nums text-accent-strong"
+            >
+              {chip}
+            </span>
+          ))}
+        </div>
+        {profile.narrativeHighlights.length > 0 && (
+          <p className="mt-3 text-[13px] leading-relaxed text-muted">
+            {profile.narrativeHighlights.join(" · ")}
+          </p>
+        )}
+      </section>
+    );
+  }
   return (
     <section
       aria-label="Parsed student profile"
@@ -381,7 +407,7 @@ function SchoolCard({ scored, onRemove }: SchoolCardProps) {
         {collegeStatChips(college).map((chip) => (
           <span
             key={chip}
-            className="inline-flex items-center rounded bg-background px-2 py-0.5 text-xs font-medium tabular-nums text-foreground/80"
+            className="inline-flex items-center rounded bg-accent-soft px-2 py-0.5 text-xs font-medium tabular-nums text-foreground"
           >
             {chip}
           </span>
@@ -395,7 +421,11 @@ function SchoolCard({ scored, onRemove }: SchoolCardProps) {
           <span
             key={component.label}
             title={component.detail}
-            className="inline-flex items-center gap-1 rounded border border-line px-1.5 py-0.5 text-[11px] tabular-nums text-faint"
+            className={
+              component.label === "Story fit"
+                ? "inline-flex items-center gap-1 rounded border border-accent/30 bg-accent-soft/60 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-accent-strong"
+                : "inline-flex items-center gap-1 rounded border border-line px-1.5 py-0.5 text-[11px] tabular-nums text-faint"
+            }
           >
             {component.label} {formatPoints(component.points)}
           </span>
@@ -703,6 +733,18 @@ export default function Home() {
     setStudents(listStudents());
   }
 
+  // Logo-goes-home: from the result state this is exactly the start-over
+  // reset (reports are already persisted to history before display, and
+  // refine text gets the same treatment as Cancel). On the input state it
+  // is already home, and during generation it stays inert so the in-flight
+  // request cannot race the reset.
+  function handleGoHome(): void {
+    if (phase !== "result") {
+      return;
+    }
+    handleStartOver();
+  }
+
   function handlePreviewSample(): void {
     setError(null);
     setCurrentStudentId(null);
@@ -721,20 +763,34 @@ export default function Home() {
 
   return (
     <div className="flex flex-1 flex-col">
-      <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-12">
+      <header className="border-b-2 border-accent bg-foreground">
+        <div className="mx-auto flex w-full max-w-[1400px] items-center px-6 py-2.5 lg:px-10">
+          <button
+            type="button"
+            onClick={handleGoHome}
+            aria-label="College List Builder home"
+            className="flex items-center gap-2.5 transition-opacity hover:opacity-80"
+          >
+            <span aria-hidden className="h-2 w-2 rounded-[2px] bg-accent" />
+            <span className="font-display text-[17px] tracking-tight text-white">
+              College List Builder
+            </span>
+          </button>
+        </div>
+      </header>
+      <main className="mx-auto w-full max-w-[1400px] flex-1 px-6 py-12 lg:px-10">
         {phase === "input" && (
-          <div className="mx-auto max-w-2xl animate-rise">
-            <header className="mb-10 pt-4">
+          <div className="mx-auto max-w-3xl animate-rise">
+            <header className="mb-12 pt-8 text-center lg:pt-14">
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">
                 For counselors
               </p>
-              <h1 className="mt-3 font-display text-[2.75rem] leading-[1.08] tracking-tight">
-                College List Builder
+              <h1 className="mt-4 font-display text-5xl leading-[1.05] tracking-tight lg:text-[3.5rem]">
+                Describe a student. Get the list.
               </h1>
-              <p className="mt-4 max-w-xl text-lg leading-relaxed text-muted">
-                Describe a student in plain language. Get a reach, target, and
-                likely list grounded in real admissions data, ready to hand to
-                the student.
+              <p className="mx-auto mt-5 max-w-2xl text-lg leading-relaxed text-muted">
+                A reach, target, and likely college list grounded in real
+                admissions data, ready to hand to the student.
               </p>
             </header>
 
@@ -759,7 +815,7 @@ export default function Home() {
               className="w-full resize-y rounded-md border border-line bg-surface p-5 text-[15px] leading-relaxed shadow-card outline-none transition-[border-color,box-shadow] placeholder:text-faint focus:border-accent focus:ring-2 focus:ring-accent/20"
             />
 
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
               {EXAMPLE_PROMPTS.map((prompt) => (
                 <button
                   key={prompt}
@@ -770,7 +826,7 @@ export default function Home() {
                   <span className="block text-[10px] font-semibold uppercase tracking-[0.18em] text-faint transition-colors group-hover:text-accent">
                     Example
                   </span>
-                  <span className="mt-2 line-clamp-4 block text-[13px] leading-relaxed text-muted">
+                  <span className="mt-2 line-clamp-5 block text-[13px] leading-relaxed text-muted">
                     {prompt}
                   </span>
                 </button>
@@ -830,144 +886,199 @@ export default function Home() {
 
         {phase === "result" && report !== null && lists !== null && (
           <div className="animate-rise">
-            <header className="mb-8 flex flex-wrap items-end justify-between gap-4 pt-2">
-              <div>
+            {error !== null && (
+              <div className="mb-8">
+                <ErrorCard message={error} />
+              </div>
+            )}
+
+            <div className="lg:grid lg:grid-cols-[340px_minmax(0,1fr)] lg:items-start lg:gap-12 xl:grid-cols-[380px_minmax(0,1fr)] xl:gap-16">
+              <aside className="lg:sticky lg:top-10 lg:self-start">
+                <button
+                  type="button"
+                  onClick={handleStartOver}
+                  className="group mb-4 inline-flex items-center gap-1.5 text-[13px] font-medium text-muted transition-colors hover:text-foreground"
+                >
+                  <svg
+                    aria-hidden
+                    className="h-3.5 w-3.5 transition-transform group-hover:-translate-x-0.5"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M10 3 5 8l5 5" />
+                  </svg>
+                  Back to students
+                </button>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">
-                  College List Builder
+                  Report
                 </p>
-                <h1 className="mt-2 font-display text-[2rem] leading-tight tracking-tight">
+                <h1 className="mt-2 font-display text-[2rem] leading-tight tracking-tight xl:text-[2.25rem]">
                   College list
                   {report.profile.name !== null
                     ? ` for ${report.profile.name}`
                     : ""}
                 </h1>
-              </div>
-              <div className="flex items-center gap-3">
+
+                <div className="mt-6 [&>div]:items-stretch [&_button]:w-full [&_button]:justify-center [&_button]:py-3 [&_button]:text-[15px]">
+                  <DownloadButton report={report} />
+                </div>
                 <button
                   type="button"
                   onClick={handleStartOver}
-                  className="rounded-lg border border-line bg-surface px-4 py-2.5 text-sm font-medium text-foreground shadow-card transition-colors hover:bg-background"
+                  className="mt-3 w-full text-center text-[13px] font-medium text-muted transition-colors hover:text-foreground"
                 >
                   Start over
                 </button>
-                <DownloadButton report={report} />
-              </div>
-            </header>
 
-            {error !== null && (
-              <div className="mb-6">
-                <ErrorCard message={error} />
-              </div>
-            )}
-
-            {versions.length > 0 && (
-              <div className="mb-6 flex flex-wrap items-center gap-3">
-                {versions.length > 1 && (
-                  <div
-                    role="group"
-                    aria-label="Report versions"
-                    className="inline-flex items-center gap-0.5 rounded-md border border-line bg-surface p-0.5 shadow-card"
-                  >
-                    {versions.map((version, index) => (
+                {versions.length > 0 && (
+                  <div className="mt-8 border-t border-line pt-6">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-faint">
+                      Versions
+                    </p>
+                    {(versions.length > 1 || finalVersionIndex >= 0) && (
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      {versions.length > 1 && (
+                        <div
+                          role="group"
+                          aria-label="Report versions"
+                          className="inline-flex items-center gap-0.5 rounded-md border border-line bg-surface p-0.5 shadow-card"
+                        >
+                          {versions.map((version, index) => (
+                            <button
+                              key={`v${index + 1}`}
+                              type="button"
+                              onClick={() => handleSelectVersion(index)}
+                              aria-pressed={index === versionIndex}
+                              className={
+                                index === versionIndex
+                                  ? "rounded bg-accent px-3 py-1 text-xs font-semibold tabular-nums text-white"
+                                  : "rounded px-3 py-1 text-xs font-medium tabular-nums text-muted transition-colors hover:bg-background"
+                              }
+                            >
+                              v{index + 1}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {finalVersionIndex >= 0 && (
+                        <span className="inline-flex items-center rounded-full bg-accent-soft px-2.5 py-1 text-xs font-medium tabular-nums text-accent-strong">
+                          v{finalVersionIndex + 1} marked final
+                        </span>
+                      )}
+                    </div>
+                    )}
+                    <div className="mt-3 flex items-center gap-2">
                       <button
-                        key={`v${index + 1}`}
                         type="button"
-                        onClick={() => handleSelectVersion(index)}
-                        aria-pressed={index === versionIndex}
-                        className={
-                          index === versionIndex
-                            ? "rounded bg-accent px-3 py-1 text-xs font-semibold tabular-nums text-white"
-                            : "rounded px-3 py-1 text-xs font-medium tabular-nums text-muted transition-colors hover:bg-background"
-                        }
+                        onClick={() => handleToggleFinal(versionIndex)}
+                        className="flex-1 rounded-md border border-line bg-surface px-3 py-1.5 text-xs font-medium text-foreground shadow-card transition-colors hover:bg-background"
                       >
-                        v{index + 1}
+                        {displayedVersion?.isFinal === true
+                          ? "Unmark final"
+                          : "Mark as final"}
                       </button>
-                    ))}
+                      <button
+                        type="button"
+                        onClick={() => setRefineOpen((open) => !open)}
+                        className="flex-1 rounded-md border border-line bg-surface px-3 py-1.5 text-xs font-medium text-foreground shadow-card transition-colors hover:bg-background"
+                      >
+                        {refineOpen ? "Close refine" : "Refine"}
+                      </button>
+                    </div>
                   </div>
                 )}
-                {finalVersionIndex >= 0 && (
-                  <span className="inline-flex items-center rounded-full bg-accent-soft px-2.5 py-1 text-xs font-medium tabular-nums text-accent-strong">
-                    v{finalVersionIndex + 1} marked final
-                  </span>
+
+                {refineOpen && (
+                  <div className="animate-rise mt-4 rounded-md border border-line bg-surface p-4 shadow-card">
+                    <label
+                      htmlFor="refine-context"
+                      className="mb-2 block text-sm font-medium text-foreground"
+                    >
+                      Add more context about this student
+                    </label>
+                    <textarea
+                      id="refine-context"
+                      rows={3}
+                      value={refineText}
+                      onChange={(event) => setRefineText(event.target.value)}
+                      placeholder="New scores, activities, preferences, or anything else you have learned."
+                      className="w-full resize-y rounded-md border border-line bg-surface p-3 text-sm leading-relaxed outline-none transition-[border-color,box-shadow] placeholder:text-faint focus:border-accent focus:ring-2 focus:ring-accent/20"
+                    />
+                    <div className="mt-3 flex items-center justify-end gap-4">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRefineOpen(false);
+                          setRefineText("");
+                        }}
+                        className="text-sm font-medium text-muted transition-colors hover:text-foreground"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleRefine}
+                        disabled={refineText.trim().length === 0}
+                        className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white shadow-card transition-all hover:bg-accent-strong active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Regenerate list
+                      </button>
+                    </div>
+                  </div>
                 )}
-                <div className="ml-auto flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => handleToggleFinal(versionIndex)}
-                    className="rounded-md border border-line bg-surface px-3 py-1.5 text-xs font-medium text-foreground shadow-card transition-colors hover:bg-background"
-                  >
-                    {displayedVersion?.isFinal === true
-                      ? "Unmark final"
-                      : "Mark as final"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRefineOpen((open) => !open)}
-                    className="rounded-md border border-line bg-surface px-3 py-1.5 text-xs font-medium text-foreground shadow-card transition-colors hover:bg-background"
-                  >
-                    {refineOpen ? "Close refine" : "Refine"}
-                  </button>
-                </div>
-              </div>
-            )}
 
-            {refineOpen && (
-              <div className="animate-rise mb-6 rounded-md border border-line bg-surface p-5 shadow-card">
-                <label
-                  htmlFor="refine-context"
-                  className="mb-2 block text-sm font-medium text-foreground"
-                >
-                  Add more context about this student
-                </label>
-                <textarea
-                  id="refine-context"
-                  rows={3}
-                  value={refineText}
-                  onChange={(event) => setRefineText(event.target.value)}
-                  placeholder="New scores, activities, preferences, or anything else you have learned."
-                  className="w-full resize-y rounded-md border border-line bg-surface p-3 text-sm leading-relaxed outline-none transition-[border-color,box-shadow] placeholder:text-faint focus:border-accent focus:ring-2 focus:ring-accent/20"
-                />
-                <div className="mt-3 flex items-center justify-end gap-4">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRefineOpen(false);
-                      setRefineText("");
-                    }}
-                    className="text-sm font-medium text-muted transition-colors hover:text-foreground"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleRefine}
-                    disabled={refineText.trim().length === 0}
-                    className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white shadow-card transition-all hover:bg-accent-strong active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Regenerate list
-                  </button>
+                <div className="mt-8 border-t border-line pt-6">
+                  <ProfileCard profile={report.profile} variant="rail" />
                 </div>
-              </div>
-            )}
 
-            <ProfileCard profile={report.profile} />
+                <div className="mt-8 border-t border-line pt-6">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-faint">
+                    On this list
+                  </p>
+                  <ul className="mt-3 space-y-2.5">
+                    {BUCKET_ORDER.map((bucket) => (
+                      <li
+                        key={bucket}
+                        className="flex items-baseline justify-between text-sm"
+                      >
+                        <span className="text-muted">
+                          {BUCKET_META[bucket].title}
+                        </span>
+                        <span className="font-semibold tabular-nums text-accent-strong">
+                          {lists[bucket].length}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </aside>
+
+              <div className="mt-12 min-w-0 lg:mt-0">
 
             {BUCKET_ORDER.map((bucket) => {
               const schools = lists[bucket];
               const meta = BUCKET_META[bucket];
               return (
-                <section key={bucket} aria-label={meta.title} className="mt-10">
-                  <div className="border-b border-line pb-3">
+                <section
+                  key={bucket}
+                  aria-label={meta.title}
+                  className="mt-12 first:mt-0"
+                >
+                  <div className="border-b border-line pb-3.5">
                     <div className="flex items-baseline justify-between gap-4">
-                      <h3 className="font-display text-2xl tracking-tight">
+                      <h3 className="font-display text-[1.75rem] leading-tight tracking-tight">
                         {meta.title}
                       </h3>
-                      <span className="shrink-0 rounded-full bg-accent-soft px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] tabular-nums text-accent-strong">
+                      <span className="shrink-0 rounded-full bg-accent-soft px-3 py-1 text-xs font-semibold uppercase tracking-[0.08em] tabular-nums text-accent-strong">
                         {schools.length}{" "}
                         {schools.length === 1 ? "school" : "schools"}
                       </span>
                     </div>
-                    <p className="mt-1 text-sm text-muted">{meta.note}</p>
+                    <p className="mt-1.5 text-[15px] text-muted">{meta.note}</p>
                   </div>
                   {schools.length === 0 ? (
                     <p className="mt-4 text-sm text-faint">
@@ -990,9 +1101,11 @@ export default function Home() {
               );
             })}
 
-            <footer className="mt-14 border-t border-line pt-4 text-xs text-faint">
-              Data: US Dept of Education College Scorecard
-            </footer>
+                <footer className="mt-14 border-t border-line pt-4 text-xs text-faint">
+                  Data: US Dept of Education College Scorecard
+                </footer>
+              </div>
+            </div>
           </div>
         )}
       </main>

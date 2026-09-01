@@ -9,8 +9,10 @@ import { GeminiError, isGeminiConfigured, isRecord, parseProfile } from "@/lib/g
 import type { ApiError, ParseResponse } from "@/lib/types";
 
 export const runtime = "nodejs";
-// A cold Gemini call comfortably exceeds the 10s platform default.
-export const maxDuration = 30;
+// The parse step can spend two 20s Gemini attempts back to back (a first call
+// plus one retry on unparseable JSON), so the budget matches the report route
+// rather than cutting the retry off mid-flight.
+export const maxDuration = 60;
 
 const MAX_DESCRIPTION_LENGTH = 4000;
 

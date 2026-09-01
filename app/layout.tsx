@@ -26,7 +26,6 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${fraunces.variable} ${inter.variable} h-full antialiased`}
     >
       <body className="flex min-h-full flex-col bg-background text-foreground">
-        <div aria-hidden className="h-[3px] shrink-0 bg-accent" />
         {children}
       </body>
     </html>

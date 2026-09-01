@@ -189,11 +189,23 @@ function applyModelOutput(
     points: score * STORY_FIT_WEIGHT,
   };
 
-  return { ...withProse, storyFit, components: [...withProse.components, component] };
+  // The same points fold into the score so it stays the sum of the printed
+  // components and matches the ordering key orderBucket sorts on.
+  return {
+    ...withProse,
+    storyFit,
+    score: withProse.score + component.points,
+    components: [...withProse.components, component],
+  };
 }
 
 /** Deterministic fit score plus the story-fit bonus. Used only for ordering. */
 function orderingScore(scored: ScoredCollege): number {
+  // A visible story fit is already folded into score as a component; adding it
+  // again here would double-count it. Only a below-threshold story fit, which
+  // has no component, still needs its bonus applied at ordering time.
+  const folded = scored.components.some((component) => component.label === STORY_FIT_LABEL);
+  if (folded) return scored.score;
   return scored.score + (scored.storyFit?.score ?? 0) * STORY_FIT_WEIGHT;
 }
 

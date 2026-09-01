@@ -467,6 +467,11 @@ const RATIONALES_SCHEMA: Schema = {
   items: {
     type: Type.OBJECT,
     properties: {
+      index: {
+        type: Type.INTEGER,
+        description:
+          "The index of the school this entry describes, echoed exactly from that school's block in the SCHOOLS array.",
+      },
       rationale: {
         type: Type.STRING,
         description: "A two-sentence rationale for the school at the matching index.",
@@ -482,8 +487,8 @@ const RATIONALES_SCHEMA: Schema = {
           "Exactly one sentence, addressed to the student, naming the thread of their own narrative this score is about. Never a restatement of a whyItScored entry.",
       },
     },
-    required: ["rationale", "storyFit", "storyFitReason"],
-    propertyOrdering: ["rationale", "storyFit", "storyFitReason"],
+    required: ["index", "rationale", "storyFit", "storyFitReason"],
+    propertyOrdering: ["index", "rationale", "storyFit", "storyFitReason"],
   },
 };
 
@@ -608,6 +613,82 @@ function normalizeRationaleEntry(entry: unknown): RationaleResult {
   return { rationale, storyFit: normalizeStoryFit(entry.storyFit), storyFitReason: reason };
 }
 
+/** The entry a school gets when the model's batch cannot be trusted for it. */
+function emptyRationale(): RationaleResult {
+  return { rationale: "", storyFit: MIN_STORY_FIT, storyFitReason: "" };
+}
+
+/** Common naming words stripped before checking prose for another school's name. */
+const COLLEGE_NAME_SUFFIXES = /\b(?:university|college|institute|institution|school|of|the|at)\b/gi;
+
+/** The distinctive part of a college name, lowercased, for substring checks. */
+function coreCollegeName(name: string): string {
+  return name.replace(COLLEGE_NAME_SUFFIXES, " ").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+/**
+ * True when the prose names a different school in the same batch.
+ *
+ * A rationale that talks about another list member is misattributed even when
+ * its echoed index matches, so the caller drops it rather than publishing it.
+ * A core name that is too short, or one the school's own name also contains,
+ * cannot distinguish the two schools and is skipped.
+ */
+function mentionsAnotherSchool(
+  prose: string,
+  selfIndex: number,
+  items: RationaleItem[],
+): boolean {
+  const haystack = prose.toLowerCase();
+  const ownName = items[selfIndex].college.name.toLowerCase();
+  for (let i = 0; i < items.length; i += 1) {
+    if (i === selfIndex) continue;
+    const core = coreCollegeName(items[i].college.name);
+    if (core.length < 4 || ownName.includes(core)) continue;
+    if (haystack.includes(core)) return true;
+  }
+  return false;
+}
+
+/**
+ * Re-aligns the raw batch by each entry's echoed index.
+ *
+ * Positional trust is what let a dropped or merged entry mid-batch shift every
+ * later school's prose onto the wrong school. Here an entry only lands on a
+ * school when exactly one entry echoes that school's index and its prose does
+ * not name a different school in the batch; a missing or duplicate echo leaves
+ * that school on the deterministic fallback.
+ */
+function alignByEchoedIndex(raw: unknown[], items: RationaleItem[]): RationaleResult[] {
+  const byIndex = new Map<number, unknown[]>();
+  for (const entry of raw) {
+    if (!isRecord(entry)) continue;
+    const echoed = asFiniteNumber(entry.index);
+    if (echoed === null || !Number.isInteger(echoed) || echoed < 0 || echoed >= items.length) {
+      continue;
+    }
+    const bucket = byIndex.get(echoed);
+    if (bucket === undefined) {
+      byIndex.set(echoed, [entry]);
+    } else {
+      bucket.push(entry);
+    }
+  }
+
+  return items.map((_item, index) => {
+    const matches = byIndex.get(index) ?? [];
+    if (matches.length !== 1) {
+      return emptyRationale();
+    }
+    const normalized = normalizeRationaleEntry(matches[0]);
+    const prose = `${normalized.rationale} ${normalized.storyFitReason}`;
+    if (mentionsAnotherSchool(prose, index, items)) {
+      return emptyRationale();
+    }
+    return normalized;
+  });
+}
+
 /**
  * Writes one rationale and one story-fit read per school in a single batched request.
  *
@@ -615,9 +696,10 @@ function normalizeRationaleEntry(entry: unknown): RationaleResult {
  * the same response, not a second pass: a per-school or per-signal call would
  * multiply cost and latency by the length of the list for no quality gain.
  *
- * Returns an array positionally aligned with `items`. Entries may carry empty
- * strings and the array may be shorter than `items`; the caller is expected to
- * fall back per school rather than trust the length.
+ * Returns an array positionally aligned with `items`, paired by each entry's
+ * echoed index rather than by array position. A school whose echo is missing,
+ * duplicated, or whose prose names a different batch member comes back as an
+ * empty entry; the caller is expected to fall back per school.
  *
  * @throws {GeminiError} On a missing key, a transport failure, a 25s timeout, or unusable JSON.
  */
@@ -640,6 +722,8 @@ export async function writeRationales(
     "",
     `Return a JSON array of exactly ${items.length} objects, in the same order as the SCHOOLS array.`,
     "The object at each position describes the school at that index.",
+    "",
+    "index: echo the index of the school this object describes, copied exactly from that school's block. Every school's index must appear exactly once.",
     "",
     "rationale: two sentences. Ground every sentence in that school's own block. A number that does not appear in the block must not appear in the rationale.",
     "",
@@ -674,5 +758,5 @@ export async function writeRationales(
     throw new GeminiError("unparseable-json", "Expected a JSON array of rationale objects");
   }
 
-  return raw.map(normalizeRationaleEntry);
+  return alignByEchoedIndex(raw, items);
 }
