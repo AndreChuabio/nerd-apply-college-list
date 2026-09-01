@@ -1,12 +1,16 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f7f6f3;
-  --foreground: #1c1917;
+  /* Warm paper ground, white cards, deep ink navy, one emerald accent. */
+  --background: #f7f6f2;
   --surface: #ffffff;
-  --accent: #1d4ed8;
-  --accent-strong: #1e40af;
-  --accent-soft: #eef3fe;
+  --foreground: #1a2438;
+  --accent: #157a5a;
+  --accent-strong: #0f5f46;
+  --accent-soft: #e8f1ec;
+  --muted: #6c675e;
+  --faint: #9b958a;
+  --line: #e7e3da;
 }
 
 @theme inline {
@@ -16,8 +20,13 @@
   --color-accent: var(--accent);
   --color-accent-strong: var(--accent-strong);
   --color-accent-soft: var(--accent-soft);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-line: var(--line);
+  --font-sans: var(--font-inter);
+  --font-display: var(--font-fraunces);
+  --shadow-card: 0 1px 2px rgb(26 36 56 / 0.05), 0 1px 1px rgb(26 36 56 / 0.03);
+  --shadow-lift: 0 3px 10px rgb(26 36 56 / 0.07), 0 1px 2px rgb(26 36 56 / 0.05);
 }
 
 html {
@@ -30,10 +39,15 @@ body {
   font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
 }
 
+::selection {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
 @keyframes rise {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(10px);
   }
   to {
     opacity: 1;
@@ -42,5 +56,15 @@ body {
 }
 
 .animate-rise {
-  animation: rise 0.35s ease-out both;
+  animation: rise 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-rise,
+  .animate-spin {
+    animation: none;
+  }
+  * {
+    transition-duration: 0.01ms !important;
+  }
 }

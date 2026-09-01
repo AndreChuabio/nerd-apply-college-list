@@ -37,16 +37,16 @@ export default function HistoryPanel({
     return null;
   }
   return (
-    <section aria-label="Recent students" className="mt-10">
-      <div className="flex items-baseline gap-3 border-b border-zinc-200 pb-2">
-        <h2 className="text-sm font-semibold uppercase tracking-widest text-accent">
+    <section aria-label="Recent students" className="mt-12">
+      <div className="flex items-baseline justify-between pb-2.5">
+        <h2 className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
           Recent students
         </h2>
-        <span className="ml-auto shrink-0 text-xs text-zinc-400">
+        <span className="shrink-0 text-xs tabular-nums text-faint">
           {students.length} saved
         </span>
       </div>
-      <ul className="mt-3 flex flex-col gap-2">
+      <ul className="divide-y divide-line overflow-hidden rounded-md border border-line bg-surface shadow-card">
         {students.map((student) => {
           const finalIndex = student.versions.findIndex(
             (version) => version.isFinal
@@ -55,7 +55,7 @@ export default function HistoryPanel({
           const date = formatDate(student.createdAt);
           return (
             <li key={student.id}>
-              <div className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-surface p-3.5 shadow-sm transition-colors hover:border-accent/50">
+              <div className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-background/60">
                 <button
                   type="button"
                   onClick={() => onOpen(student.id)}
@@ -66,12 +66,12 @@ export default function HistoryPanel({
                       {student.label}
                     </span>
                     {finalIndex >= 0 && (
-                      <span className="inline-flex shrink-0 items-center rounded-full bg-accent-soft px-2 py-0.5 text-[11px] font-medium text-accent-strong">
+                      <span className="inline-flex shrink-0 items-center rounded-full bg-accent-soft px-2 py-0.5 text-[11px] font-medium tabular-nums text-accent-strong">
                         v{finalIndex + 1} final
                       </span>
                     )}
                   </span>
-                  <span className="mt-0.5 text-xs text-zinc-500">
+                  <span className="mt-0.5 text-xs tabular-nums text-muted">
                     {date.length > 0 ? `${date} · ` : ""}
                     {versionCount} {versionCount === 1 ? "version" : "versions"}
                   </span>
@@ -80,7 +80,7 @@ export default function HistoryPanel({
                   type="button"
                   onClick={() => onDelete(student.id)}
                   aria-label={`Delete ${student.label} from recent students`}
-                  className="-m-1 shrink-0 rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700"
+                  className="-m-1 shrink-0 rounded p-1 text-faint transition-colors hover:bg-line/70 hover:text-foreground"
                 >
                   <svg
                     aria-hidden

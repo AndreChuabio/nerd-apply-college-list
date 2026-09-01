@@ -87,6 +87,11 @@ export interface ScoredCollege {
   components: ScoreComponent[];
   rationale: string; // two lines max, grounded prose
   rationaleSource: "gemini" | "fallback";
+  // Semantic read of how well this school serves the student's own story,
+  // written by the model and cleared by the guardrail. Optional on purpose:
+  // it is absent whenever the model step degraded or the reason failed the
+  // check, and it never changes which bucket a school lands in.
+  storyFit?: { score: number; reason: string };
 }
 
 export interface Report {

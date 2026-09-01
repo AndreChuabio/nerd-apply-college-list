@@ -39,6 +39,12 @@ const MAX_INTERESTS = 5;
 const MAX_HIGHLIGHTS = 6;
 const MAX_HIGHLIGHT_LENGTH = 240;
 
+// Story fit is a 0-10 integer. The bounds live here because both the schema
+// description and the clamp have to agree on them.
+const MIN_STORY_FIT = 0;
+const MAX_STORY_FIT = 10;
+const MAX_STORY_FIT_REASON_LENGTH = 240;
+
 // ---------- Typed errors ----------
 
 export type GeminiErrorCode =
@@ -447,20 +453,68 @@ export interface RationaleItem {
   components: { label: string; detail: string }[];
 }
 
+/** One school's worth of model output: the prose plus the scored story-fit read. */
+export interface RationaleResult {
+  rationale: string;
+  /** Integer 0-10. Zero whenever the entry carried no usable reason. */
+  storyFit: number;
+  /** One sentence. Empty means the caller must not publish a story fit for this school. */
+  storyFitReason: string;
+}
+
 const RATIONALES_SCHEMA: Schema = {
   type: Type.ARRAY,
   items: {
-    type: Type.STRING,
-    description: "A two-sentence rationale for the school at the matching index.",
+    type: Type.OBJECT,
+    properties: {
+      rationale: {
+        type: Type.STRING,
+        description: "A two-sentence rationale for the school at the matching index.",
+      },
+      storyFit: {
+        type: Type.INTEGER,
+        description:
+          "Integer 0 to 10 for how well this school serves the parts of the student's story that whyItScored does not already credit. 0 to 3 when nothing in the block speaks to their own words beyond that credit, 4 to 6 when one distinctive thread is served, 7 to 10 when several are.",
+      },
+      storyFitReason: {
+        type: Type.STRING,
+        description:
+          "Exactly one sentence, addressed to the student, naming the thread of their own narrative this score is about. Never a restatement of a whyItScored entry.",
+      },
+    },
+    required: ["rationale", "storyFit", "storyFitReason"],
+    propertyOrdering: ["rationale", "storyFit", "storyFitReason"],
   },
 };
 
 const RATIONALE_SYSTEM_INSTRUCTION = [
-  "You write short rationales for a college counselor's student-facing college list.",
+  "You write short rationales for a college counselor's student-facing college list, and you score how well each school serves the student's own story.",
   "For each school, use only the facts inside that school's JSON block plus the student profile.",
   "Never introduce a number, statistic, ranking, program, or claim that is not in the provided data.",
-  "Exactly two sentences per school. Warm and professional, addressed to the student.",
+  "The rationale is exactly two sentences. Warm and professional, addressed to the student.",
   "No emojis. No exclamation marks. No hedging filler such as 'it seems' or 'perhaps'.",
+  // The story-fit rules are the whole safety surface of this field: it invites
+  // the model to reason about things the dataset does not cover (athletics,
+  // campus culture, specific majors), which is exactly where a report starts
+  // making promises a school never made.
+  "The story fit score judges only how well THIS school, as described in its block, serves THIS student's story as they told it.",
+  // Without this the score silently becomes a second copy of the deterministic
+  // scorer: the model reads whyItScored, agrees with it, and awards a high
+  // story fit for restating the components already printed on the same card.
+  // Story fit only earns its place by covering what the scorer cannot see.
+  "The whyItScored entries already credit the student's stated interests, location, campus size, cost, and learning style. Story fit must never re-credit them.",
+  "Story fit is about what those entries cannot see: the student's own words, activities, ambitions, and worries, especially their narrativeHighlights.",
+  "If the only connection you can name is one whyItScored already lists, the score is low, not high. A reason that restates a whyItScored entry is wrong.",
+  // The line between "re-crediting" and "reading the student properly". A
+  // parsed interest of 'business' loses the fact that this student is obsessed
+  // with finance specifically; a school whose block answers that intensity is
+  // serving the story, not repeating the component.
+  "Where the student's own words are more specific or more intense than that generic credit, a block that answers the specific version does earn story fit. Judging that is the point of this field.",
+  "Score the strength of the connection, not your confidence. If your sentence says a school aligns strongly with their story, the number must say so too.",
+  "Use the full range and discriminate between schools. Giving every school on a list the same score means the signal is not being judged.",
+  "The reason must never assert a fact about the school that is not in its block. No athletics claims, no campus culture claims, no program claims beyond the degree shares given.",
+  "When the student's story raises something the block cannot speak to, write it as their own thread to verify, not as a fact about the school. For example: 'Your interest in playing college soccer is worth checking against its athletics offerings.'",
+  "Score the story, not your own knowledge of the school. A school you happen to know is famous for something scores no higher for it unless the block says so.",
 ].join(" ");
 
 /** Rounds a 0-1 rate into whole percent, or null when the rate is missing. */
@@ -522,10 +576,46 @@ function buildProfileBlock(profile: StudentProfile): Record<string, unknown> {
   };
 }
 
+/** Clamps the model's story-fit number to the documented 0-10 integer scale. */
+function normalizeStoryFit(value: unknown): number {
+  const parsed = asFiniteNumber(value);
+  if (parsed === null) return MIN_STORY_FIT;
+  return Math.min(Math.max(Math.round(parsed), MIN_STORY_FIT), MAX_STORY_FIT);
+}
+
 /**
- * Writes one rationale per school in a single batched request.
+ * Narrows one entry of the batch.
  *
- * Returns an array positionally aligned with `items`. Entries may be empty
+ * A score without a reason is dropped to zero rather than published bare: a
+ * number a student cannot see the argument for is worse than no number, and
+ * the caller keys "publish a story fit at all" off a non-empty reason.
+ */
+function normalizeRationaleEntry(entry: unknown): RationaleResult {
+  if (!isRecord(entry)) {
+    return { rationale: "", storyFit: MIN_STORY_FIT, storyFitReason: "" };
+  }
+
+  const rationale = typeof entry.rationale === "string" ? entry.rationale.trim() : "";
+  const reason =
+    typeof entry.storyFitReason === "string"
+      ? entry.storyFitReason.trim().slice(0, MAX_STORY_FIT_REASON_LENGTH)
+      : "";
+
+  if (reason.length === 0) {
+    return { rationale, storyFit: MIN_STORY_FIT, storyFitReason: "" };
+  }
+
+  return { rationale, storyFit: normalizeStoryFit(entry.storyFit), storyFitReason: reason };
+}
+
+/**
+ * Writes one rationale and one story-fit read per school in a single batched request.
+ *
+ * Deliberately still ONE call for the whole list. Story fit is extra fields on
+ * the same response, not a second pass: a per-school or per-signal call would
+ * multiply cost and latency by the length of the list for no quality gain.
+ *
+ * Returns an array positionally aligned with `items`. Entries may carry empty
  * strings and the array may be shorter than `items`; the caller is expected to
  * fall back per school rather than trust the length.
  *
@@ -534,13 +624,13 @@ function buildProfileBlock(profile: StudentProfile): Record<string, unknown> {
 export async function writeRationales(
   items: RationaleItem[],
   profile: StudentProfile,
-): Promise<string[]> {
+): Promise<RationaleResult[]> {
   if (items.length === 0) return [];
 
   const schools = items.map((item, index) => buildCollegeBlock(item, index));
 
   const prompt = [
-    `Write one rationale for each of the ${items.length} schools below.`,
+    `Write one rationale and one story fit read for each of the ${items.length} schools below.`,
     "",
     "STUDENT PROFILE:",
     JSON.stringify(buildProfileBlock(profile), null, 2),
@@ -548,25 +638,41 @@ export async function writeRationales(
     "SCHOOLS:",
     JSON.stringify(schools, null, 2),
     "",
-    `Return a JSON array of exactly ${items.length} strings, in the same order as the SCHOOLS array.`,
-    "The string at each position is the rationale for the school at that index.",
-    "Ground every sentence in that school's own block. A number that does not appear in the block must not appear in the rationale.",
+    `Return a JSON array of exactly ${items.length} objects, in the same order as the SCHOOLS array.`,
+    "The object at each position describes the school at that index.",
+    "",
+    "rationale: two sentences. Ground every sentence in that school's own block. A number that does not appear in the block must not appear in the rationale.",
+    "",
+    "storyFit: an integer 0 to 10 for how well this school serves the parts of the student's story that this school's whyItScored entries do NOT already credit.",
+    "  whyItScored already covers their stated interests, location, size, cost, and learning style. Re-crediting any of those is wrong.",
+    "  Judge what it cannot cover: their own words, activities, ambitions, and worries, above all their narrativeHighlights.",
+    "  Where their own words are more specific or more intense than that generic credit, a block that answers the specific version does earn story fit.",
+    "  Keep the number and the sentence consistent. A sentence saying a school aligns strongly must carry a high number.",
+    "  0 to 3: nothing in this block speaks to their own words beyond what whyItScored already credits.",
+    "  4 to 6: this block speaks to one distinctive thread of their narrative more specifically than that credit does.",
+    "  7 to 10: this block speaks to several distinct threads of their narrative, or to one with unusual strength.",
+    "  Discriminate between these schools. If every school gets the same score, you are not judging the signal.",
+    "",
+    "storyFitReason: one sentence, addressed to the student, naming the thread the score is about. Never a restatement of a whyItScored entry.",
+    "  It must not assert anything about the school beyond this block. No athletics, no campus culture, no programs beyond the degree shares given.",
+    "  If their story raises something the block cannot speak to, phrase it as theirs to verify, for example 'Your interest in playing college soccer is worth checking against its athletics offerings'.",
+    "  The same numeric rule as the rationale applies: a number not in the block must not appear.",
   ].join("\n");
 
   const raw = await generateJson({
     systemInstruction: RATIONALE_SYSTEM_INSTRUCTION,
     prompt,
     schema: RATIONALES_SCHEMA,
-    // Enough variation that twelve rationales do not read identically, low
-    // enough that the model stays anchored to the supplied facts.
-    temperature: 0.4,
+    // Low temperature keeps story-fit scores stable across runs while the
+    // prose stays anchored to the supplied facts.
+    temperature: 0.2,
     thinkingLevel: ThinkingLevel.LOW,
     timeoutMs: RATIONALE_TIMEOUT_MS,
   });
 
   if (!Array.isArray(raw)) {
-    throw new GeminiError("unparseable-json", "Expected a JSON array of rationale strings");
+    throw new GeminiError("unparseable-json", "Expected a JSON array of rationale objects");
   }
 
-  return raw.map((entry) => (typeof entry === "string" ? entry.trim() : ""));
+  return raw.map(normalizeRationaleEntry);
 }

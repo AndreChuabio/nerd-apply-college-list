@@ -18,6 +18,7 @@ import {
   normalizeProfile,
   writeRationales,
   type RationaleItem,
+  type RationaleResult,
 } from "@/lib/gemini";
 import { validateRationale } from "@/lib/guardrail";
 import { buildFallbackRationale, matchColleges } from "@/lib/match";
@@ -26,6 +27,7 @@ import type {
   Bucket,
   Report,
   ReportResponse,
+  ScoreComponent,
   ScoredCollege,
   StudentProfile,
 } from "@/lib/types";
@@ -38,6 +40,24 @@ const MAX_SCHOOLS = 12;
 const BASE_PER_BUCKET = 4;
 // Unused slots go to targets first: they carry the most decision value.
 const BUCKET_FILL_ORDER: readonly Bucket[] = ["target", "reach", "likely"];
+
+// ---------- Story fit ----------
+//
+// Story fit is the one place a model influences the report's structure, and it
+// is bounded on purpose. It reorders schools inside a bucket and nothing else:
+// which bucket a school lands in, and how many schools each bucket holds, stay
+// exactly where the deterministic matcher put them.
+//
+// The weight is the whole knob. At 3 points per story point, a perfect 10 is
+// worth 30 - enough to lift a school past a mid-strength preference component,
+// not enough to outrank a full program-fit match plus an in-state bonus. A
+// student's narrative should move the order, not overwrite the data.
+const STORY_FIT_WEIGHT = 3;
+// Below this the signal is not worth a line in the report. Showing "Story fit
+// +6" next to a lukewarm sentence adds noise to every card instead of marking
+// the schools where the story genuinely lines up.
+const STORY_FIT_VISIBLE_AT = 6;
+const STORY_FIT_LABEL = "Story fit";
 
 type BucketedColleges = Record<Bucket, ScoredCollege[]>;
 
@@ -89,7 +109,7 @@ function capBuckets(matched: BucketedColleges): BucketedColleges {
 async function generateRationales(
   ordered: ScoredCollege[],
   profile: StudentProfile,
-): Promise<string[]> {
+): Promise<RationaleResult[]> {
   if (ordered.length === 0 || !isGeminiConfigured()) return [];
 
   const items: RationaleItem[] = ordered.map((scored) => ({
@@ -112,34 +132,89 @@ async function generateRationales(
 }
 
 /**
- * Publishes model prose only when the guardrail clears it.
+ * Publishes model prose and the story-fit read only when the guardrail clears them.
+ *
+ * The two are judged independently against the same grounding data. A school
+ * can keep a clean rationale and lose its story fit, or the reverse; a failure
+ * on either side never drops the school itself.
  *
  * A short batch, an empty entry, or a fabricated number all land on the same
  * deterministic fallback, and the source is recorded so the difference is
  * visible in the report rather than hidden.
  */
-function applyRationale(
+function applyModelOutput(
   scored: ScoredCollege,
   profile: StudentProfile,
-  candidate: string | undefined,
+  candidate: RationaleResult | undefined,
 ): ScoredCollege {
   // The scorer's own detail strings are passed as grounding so a figure it
   // computed and showed the model is quotable, while anything else is not.
   const groundingDetails = scored.components.map((component) => component.detail);
 
+  const rationale = candidate?.rationale ?? "";
+  const withProse: ScoredCollege =
+    rationale.length > 0 &&
+    validateRationale(rationale, scored.college, profile, groundingDetails)
+      ? { ...scored, rationale, rationaleSource: "gemini" }
+      : {
+          ...scored,
+          rationale: buildFallbackRationale(scored, profile),
+          rationaleSource: "fallback",
+        };
+
+  const reason = candidate?.storyFitReason ?? "";
+  // Same digit check as the prose. A story-fit sentence is student-facing text
+  // from the same call, so it earns no weaker a check just because it is short.
   if (
-    typeof candidate === "string" &&
-    candidate.trim().length > 0 &&
-    validateRationale(candidate, scored.college, profile, groundingDetails)
+    reason.length === 0 ||
+    !validateRationale(reason, scored.college, profile, groundingDetails)
   ) {
-    return { ...scored, rationale: candidate.trim(), rationaleSource: "gemini" };
+    return withProse;
   }
 
-  return {
-    ...scored,
-    rationale: buildFallbackRationale(scored, profile),
-    rationaleSource: "fallback",
+  const score = candidate?.storyFit ?? 0;
+  const storyFit = { score, reason };
+
+  if (score < STORY_FIT_VISIBLE_AT) {
+    // Still attached, so the ordering and any downstream consumer can see it,
+    // just not surfaced as its own line on the card.
+    return { ...withProse, storyFit };
+  }
+
+  // Rendered by the existing components list in both the app and the PDF, so
+  // this signal reaches the student with no change to either surface.
+  const component: ScoreComponent = {
+    label: STORY_FIT_LABEL,
+    detail: reason,
+    points: score * STORY_FIT_WEIGHT,
   };
+
+  return { ...withProse, storyFit, components: [...withProse.components, component] };
+}
+
+/** Deterministic fit score plus the story-fit bonus. Used only for ordering. */
+function orderingScore(scored: ScoredCollege): number {
+  return scored.score + (scored.storyFit?.score ?? 0) * STORY_FIT_WEIGHT;
+}
+
+/**
+ * Orders one bucket with story fit folded in.
+ *
+ * Tie-breaks mirror the matcher's own (graduation rate, then name), so with no
+ * story fit anywhere in the list this reduces to the order the matcher already
+ * produced. That is what makes the Gemini failure path byte-identical to the
+ * behaviour before this layer existed.
+ */
+function orderBucket(schools: ScoredCollege[]): ScoredCollege[] {
+  return [...schools].sort((a, b) => {
+    const scoreDelta = orderingScore(b) - orderingScore(a);
+    if (scoreDelta !== 0) return scoreDelta;
+
+    const gradDelta = (b.college.gradRate ?? -1) - (a.college.gradRate ?? -1);
+    if (gradDelta !== 0) return gradDelta;
+
+    return a.college.name.localeCompare(b.college.name);
+  });
 }
 
 export async function POST(request: Request): Promise<NextResponse<ReportResponse | ApiError>> {
@@ -172,27 +247,34 @@ export async function POST(request: Request): Promise<NextResponse<ReportRespons
   const ordered: ScoredCollege[] = [...capped.reach, ...capped.target, ...capped.likely];
   const rationales = await generateRationales(ordered, profile);
   const decorated = ordered.map((scored, index) =>
-    applyRationale(scored, profile, rationales[index]),
+    applyModelOutput(scored, profile, rationales[index]),
   );
 
   const reachEnd = capped.reach.length;
   const targetEnd = reachEnd + capped.target.length;
 
+  // Re-ordering happens inside each bucket slice, never across them. Membership
+  // and bucket sizes are the matcher's alone.
   const report: Report = {
     profile,
     generatedAt: new Date().toISOString(),
-    reach: decorated.slice(0, reachEnd),
-    target: decorated.slice(reachEnd, targetEnd),
-    likely: decorated.slice(targetEnd),
+    reach: orderBucket(decorated.slice(0, reachEnd)),
+    target: orderBucket(decorated.slice(reachEnd, targetEnd)),
+    likely: orderBucket(decorated.slice(targetEnd)),
   };
 
   // Cost and quality signal for one report. At scale this is the line that
-  // shows whether the guardrail is rejecting more prose than it should.
+  // shows whether the guardrail is rejecting more prose than it should, and
+  // whether story fit is landing or being dropped wholesale.
   const fromGemini = decorated.filter((scored) => scored.rationaleSource === "gemini").length;
+  const scoredStories = decorated.filter((school) => school.storyFit !== undefined).length;
+  const visibleStories = decorated.filter(
+    (school) => (school.storyFit?.score ?? 0) >= STORY_FIT_VISIBLE_AT,
+  ).length;
   console.info(
     `[report] schools=${decorated.length} gemini=${fromGemini} fallback=${
       decorated.length - fromGemini
-    } ms=${Date.now() - startedAt}`,
+    } storyfit=${scoredStories} storyfit_shown=${visibleStories} ms=${Date.now() - startedAt}`,
   );
 
   return NextResponse.json<ReportResponse>({ report });

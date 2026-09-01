@@ -219,7 +219,7 @@ function CheckIcon() {
   return (
     <svg
       aria-hidden
-      className="h-3.5 w-3.5"
+      className="h-3 w-3"
       viewBox="0 0 16 16"
       fill="none"
       stroke="currentColor"
@@ -237,40 +237,69 @@ interface GenerationStepsProps {
 }
 
 function GenerationSteps({ current }: GenerationStepsProps) {
+  const clamped = Math.min(current, STEP_LABELS.length - 1);
+  const fill = ((clamped + 0.5) / STEP_LABELS.length) * 100;
   return (
-    <ol className="flex flex-col gap-5">
-      {STEP_LABELS.map((label, index) => {
-        const done = index < current;
-        const active = index === current;
-        return (
-          <li key={label} className="flex items-center gap-3.5">
-            {done ? (
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent text-white">
-                <CheckIcon />
-              </span>
-            ) : active ? (
-              <span
-                aria-hidden
-                className="h-7 w-7 shrink-0 animate-spin rounded-full border-[3px] border-accent/25 border-t-accent"
-              />
-            ) : (
-              <span className="h-7 w-7 shrink-0 rounded-full border-2 border-zinc-300" />
-            )}
-            <span
-              className={
-                active
-                  ? "font-medium text-foreground"
-                  : done
-                    ? "text-zinc-600"
-                    : "text-zinc-400"
-              }
-            >
-              {label}
-            </span>
-          </li>
-        );
-      })}
-    </ol>
+    <div>
+      <div className="h-0.5 w-full overflow-hidden rounded-full bg-line">
+        <div
+          aria-hidden
+          className="h-full rounded-full bg-accent transition-all duration-700 ease-out"
+          style={{ width: `${fill}%` }}
+        />
+      </div>
+      <ol className="mt-8 flex flex-col">
+        {STEP_LABELS.map((label, index) => {
+          const done = index < current;
+          const active = index === current;
+          const last = index === STEP_LABELS.length - 1;
+          return (
+            <li key={label} className="flex items-stretch gap-4">
+              <div className="flex flex-col items-center">
+                {done ? (
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent text-white">
+                    <CheckIcon />
+                  </span>
+                ) : active ? (
+                  <span
+                    aria-hidden
+                    className="h-6 w-6 shrink-0 animate-spin rounded-full border-2 border-accent/20 border-t-accent"
+                  />
+                ) : (
+                  <span className="h-6 w-6 shrink-0 rounded-full border border-line bg-surface" />
+                )}
+                {!last && (
+                  <span
+                    aria-hidden
+                    className={`my-1 w-px flex-1 ${done ? "bg-accent" : "bg-line"}`}
+                  />
+                )}
+              </div>
+              <div
+                className={`flex min-w-0 flex-1 items-baseline justify-between gap-4 pt-0.5 ${
+                  last ? "" : "pb-7"
+                }`}
+              >
+                <span
+                  className={
+                    active
+                      ? "text-[15px] font-medium text-foreground"
+                      : done
+                        ? "text-[15px] text-muted"
+                        : "text-[15px] text-faint"
+                  }
+                >
+                  {label}
+                </span>
+                <span className="text-[11px] font-medium tabular-nums tracking-[0.08em] text-faint">
+                  0{index + 1}
+                </span>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
   );
 }
 
@@ -282,28 +311,28 @@ function ProfileCard({ profile }: ProfileCardProps) {
   return (
     <section
       aria-label="Parsed student profile"
-      className="animate-rise rounded-xl border border-zinc-200 bg-surface p-5 shadow-sm"
+      className="animate-rise rounded-md border border-line bg-surface p-6 shadow-card"
     >
       <div className="flex items-baseline justify-between gap-4">
-        <h2 className="text-lg font-semibold">
+        <h2 className="font-display text-2xl tracking-tight">
           {profile.name ?? "Student profile"}
         </h2>
-        <span className="text-xs font-medium uppercase tracking-widest text-zinc-400">
+        <span className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.18em] text-faint">
           Parsed profile
         </span>
       </div>
-      <div className="mt-3 flex flex-wrap gap-1.5">
+      <div className="mt-4 flex flex-wrap gap-1.5">
         {profileChips(profile).map((chip) => (
           <span
             key={chip}
-            className="inline-flex items-center rounded-full bg-accent-soft px-2.5 py-1 text-xs font-medium text-accent-strong"
+            className="inline-flex items-center rounded-full bg-accent-soft px-2.5 py-1 text-xs font-medium tabular-nums text-accent-strong"
           >
             {chip}
           </span>
         ))}
       </div>
       {profile.narrativeHighlights.length > 0 && (
-        <p className="mt-3 text-sm text-zinc-500">
+        <p className="mt-4 text-sm leading-relaxed text-muted">
           {profile.narrativeHighlights.join(" · ")}
         </p>
       )}
@@ -319,11 +348,13 @@ interface SchoolCardProps {
 function SchoolCard({ scored, onRemove }: SchoolCardProps) {
   const { college } = scored;
   return (
-    <article className="flex flex-col rounded-xl border border-zinc-200 bg-surface p-4 shadow-sm">
+    <article className="flex flex-col rounded-md border border-line bg-surface p-5 shadow-card transition-shadow duration-200 hover:shadow-lift">
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <h4 className="font-semibold leading-snug">{college.name}</h4>
-          <p className="mt-0.5 text-sm text-zinc-500">
+        <div className="min-w-0">
+          <h4 className="text-[15px] font-semibold leading-snug">
+            {college.name}
+          </h4>
+          <p className="mt-0.5 text-[13px] text-muted">
             {college.city}, {college.state}
           </p>
         </div>
@@ -331,7 +362,7 @@ function SchoolCard({ scored, onRemove }: SchoolCardProps) {
           type="button"
           onClick={onRemove}
           aria-label={`Remove ${college.name} from the list`}
-          className="-m-1 rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700"
+          className="-m-1 shrink-0 rounded p-1 text-faint transition-colors hover:bg-background hover:text-foreground"
         >
           <svg
             aria-hidden
@@ -350,21 +381,21 @@ function SchoolCard({ scored, onRemove }: SchoolCardProps) {
         {collegeStatChips(college).map((chip) => (
           <span
             key={chip}
-            className="inline-flex items-center rounded-md bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700"
+            className="inline-flex items-center rounded bg-background px-2 py-0.5 text-xs font-medium tabular-nums text-foreground/80"
           >
             {chip}
           </span>
         ))}
       </div>
-      <p className="mt-3 text-sm leading-relaxed text-zinc-700">
+      <p className="mt-3.5 text-sm leading-relaxed text-foreground/80">
         {scored.rationale}
       </p>
-      <div className="mt-auto flex flex-wrap gap-1.5 pt-3">
+      <div className="mt-auto flex flex-wrap gap-1.5 pt-4">
         {scored.components.map((component) => (
           <span
             key={component.label}
             title={component.detail}
-            className="inline-flex items-center gap-1 rounded-md border border-zinc-200 px-1.5 py-0.5 text-[11px] text-zinc-500"
+            className="inline-flex items-center gap-1 rounded border border-line px-1.5 py-0.5 text-[11px] tabular-nums text-faint"
           >
             {component.label} {formatPoints(component.points)}
           </span>
@@ -382,7 +413,7 @@ function ErrorCard({ message }: ErrorCardProps) {
   return (
     <div
       role="alert"
-      className="animate-rise rounded-xl border border-red-200 bg-red-50 p-4"
+      className="animate-rise rounded-md border border-red-200 bg-red-50 p-4"
     >
       <p className="text-sm font-semibold text-red-800">
         Something went wrong while generating the list
@@ -692,15 +723,15 @@ export default function Home() {
     <div className="flex flex-1 flex-col">
       <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-12">
         {phase === "input" && (
-          <div className="mx-auto max-w-2xl">
-            <header className="mb-8">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent">
+          <div className="mx-auto max-w-2xl animate-rise">
+            <header className="mb-10 pt-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">
                 For counselors
               </p>
-              <h1 className="mt-2 text-4xl font-semibold tracking-tight">
+              <h1 className="mt-3 font-display text-[2.75rem] leading-[1.08] tracking-tight">
                 College List Builder
               </h1>
-              <p className="mt-3 text-lg text-zinc-600">
+              <p className="mt-4 max-w-xl text-lg leading-relaxed text-muted">
                 Describe a student in plain language. Get a reach, target, and
                 likely list grounded in real admissions data, ready to hand to
                 the student.
@@ -715,7 +746,7 @@ export default function Home() {
 
             <label
               htmlFor="student-description"
-              className="mb-2 block text-sm font-medium text-zinc-700"
+              className="mb-2 block text-sm font-medium text-foreground"
             >
               Student description
             </label>
@@ -725,7 +756,7 @@ export default function Home() {
               value={description}
               onChange={(event) => setDescription(event.target.value)}
               placeholder="Name, scores, interests, and anything else you know about the student. The more context, the better the list."
-              className="w-full resize-y rounded-xl border border-zinc-300 bg-surface p-4 text-[15px] leading-relaxed shadow-sm outline-none transition-colors placeholder:text-zinc-400 focus:border-accent focus:ring-2 focus:ring-accent/20"
+              className="w-full resize-y rounded-md border border-line bg-surface p-5 text-[15px] leading-relaxed shadow-card outline-none transition-[border-color,box-shadow] placeholder:text-faint focus:border-accent focus:ring-2 focus:ring-accent/20"
             />
 
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -734,24 +765,24 @@ export default function Home() {
                   key={prompt}
                   type="button"
                   onClick={() => setDescription(prompt)}
-                  className="flex flex-col items-start rounded-xl border border-zinc-200 bg-surface p-3.5 text-left shadow-sm transition-colors hover:border-accent/50 hover:bg-accent-soft/50"
+                  className="group flex flex-col items-start rounded-md border border-line bg-surface p-4 text-left shadow-card transition-all duration-200 hover:border-accent/40 hover:shadow-lift"
                 >
-                  <span className="block text-[11px] font-semibold uppercase tracking-widest text-zinc-400">
+                  <span className="block text-[10px] font-semibold uppercase tracking-[0.18em] text-faint transition-colors group-hover:text-accent">
                     Example
                   </span>
-                  <span className="mt-1.5 line-clamp-4 block text-[13px] leading-relaxed text-zinc-600">
+                  <span className="mt-2 line-clamp-4 block text-[13px] leading-relaxed text-muted">
                     {prompt}
                   </span>
                 </button>
               ))}
             </div>
 
-            <div className="mt-6 flex items-center justify-between">
+            <div className="mt-7 flex items-center justify-between">
               {isDev ? (
                 <button
                   type="button"
                   onClick={handlePreviewSample}
-                  className="text-xs text-zinc-400 underline-offset-2 transition-colors hover:text-zinc-600 hover:underline"
+                  className="text-xs text-faint underline-offset-2 transition-colors hover:text-muted hover:underline"
                 >
                   Preview sample report
                 </button>
@@ -762,7 +793,7 @@ export default function Home() {
                 type="button"
                 onClick={handleGenerate}
                 disabled={description.trim().length === 0}
-                className="rounded-lg bg-accent px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-lg bg-accent px-6 py-2.5 text-sm font-semibold text-white shadow-card transition-all hover:bg-accent-strong active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Generate list
               </button>
@@ -777,16 +808,16 @@ export default function Home() {
         )}
 
         {phase === "generating" && (
-          <div className="mx-auto max-w-2xl">
+          <div className="mx-auto max-w-2xl animate-rise pt-4">
             <header className="mb-8">
-              <h1 className="text-2xl font-semibold tracking-tight">
+              <h1 className="font-display text-3xl tracking-tight">
                 Building the list
               </h1>
-              <p className="mt-1 text-zinc-500">
+              <p className="mt-2 text-muted">
                 This usually takes a few seconds.
               </p>
             </header>
-            <div className="rounded-xl border border-zinc-200 bg-surface p-6 shadow-sm">
+            <div className="rounded-md border border-line bg-surface p-7 shadow-card">
               <GenerationSteps current={genStep} />
             </div>
             {profile !== null && (
@@ -799,12 +830,12 @@ export default function Home() {
 
         {phase === "result" && report !== null && lists !== null && (
           <div className="animate-rise">
-            <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
+            <header className="mb-8 flex flex-wrap items-end justify-between gap-4 pt-2">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">
                   College List Builder
                 </p>
-                <h1 className="mt-1 text-2xl font-semibold tracking-tight">
+                <h1 className="mt-2 font-display text-[2rem] leading-tight tracking-tight">
                   College list
                   {report.profile.name !== null
                     ? ` for ${report.profile.name}`
@@ -815,7 +846,7 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={handleStartOver}
-                  className="rounded-lg border border-zinc-300 bg-surface px-4 py-2.5 text-sm font-medium text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50"
+                  className="rounded-lg border border-line bg-surface px-4 py-2.5 text-sm font-medium text-foreground shadow-card transition-colors hover:bg-background"
                 >
                   Start over
                 </button>
@@ -835,7 +866,7 @@ export default function Home() {
                   <div
                     role="group"
                     aria-label="Report versions"
-                    className="inline-flex items-center gap-0.5 rounded-lg border border-zinc-300 bg-surface p-0.5 shadow-sm"
+                    className="inline-flex items-center gap-0.5 rounded-md border border-line bg-surface p-0.5 shadow-card"
                   >
                     {versions.map((version, index) => (
                       <button
@@ -845,8 +876,8 @@ export default function Home() {
                         aria-pressed={index === versionIndex}
                         className={
                           index === versionIndex
-                            ? "rounded-md bg-accent px-3 py-1 text-xs font-semibold text-white"
-                            : "rounded-md px-3 py-1 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-100"
+                            ? "rounded bg-accent px-3 py-1 text-xs font-semibold tabular-nums text-white"
+                            : "rounded px-3 py-1 text-xs font-medium tabular-nums text-muted transition-colors hover:bg-background"
                         }
                       >
                         v{index + 1}
@@ -855,7 +886,7 @@ export default function Home() {
                   </div>
                 )}
                 {finalVersionIndex >= 0 && (
-                  <span className="inline-flex items-center rounded-full bg-accent-soft px-2.5 py-1 text-xs font-medium text-accent-strong">
+                  <span className="inline-flex items-center rounded-full bg-accent-soft px-2.5 py-1 text-xs font-medium tabular-nums text-accent-strong">
                     v{finalVersionIndex + 1} marked final
                   </span>
                 )}
@@ -863,7 +894,7 @@ export default function Home() {
                   <button
                     type="button"
                     onClick={() => handleToggleFinal(versionIndex)}
-                    className="rounded-lg border border-zinc-300 bg-surface px-3 py-1.5 text-xs font-medium text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50"
+                    className="rounded-md border border-line bg-surface px-3 py-1.5 text-xs font-medium text-foreground shadow-card transition-colors hover:bg-background"
                   >
                     {displayedVersion?.isFinal === true
                       ? "Unmark final"
@@ -872,7 +903,7 @@ export default function Home() {
                   <button
                     type="button"
                     onClick={() => setRefineOpen((open) => !open)}
-                    className="rounded-lg border border-zinc-300 bg-surface px-3 py-1.5 text-xs font-medium text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50"
+                    className="rounded-md border border-line bg-surface px-3 py-1.5 text-xs font-medium text-foreground shadow-card transition-colors hover:bg-background"
                   >
                     {refineOpen ? "Close refine" : "Refine"}
                   </button>
@@ -881,10 +912,10 @@ export default function Home() {
             )}
 
             {refineOpen && (
-              <div className="mb-6 rounded-xl border border-zinc-200 bg-surface p-4 shadow-sm">
+              <div className="animate-rise mb-6 rounded-md border border-line bg-surface p-5 shadow-card">
                 <label
                   htmlFor="refine-context"
-                  className="mb-2 block text-sm font-medium text-zinc-700"
+                  className="mb-2 block text-sm font-medium text-foreground"
                 >
                   Add more context about this student
                 </label>
@@ -894,16 +925,16 @@ export default function Home() {
                   value={refineText}
                   onChange={(event) => setRefineText(event.target.value)}
                   placeholder="New scores, activities, preferences, or anything else you have learned."
-                  className="w-full resize-y rounded-xl border border-zinc-300 bg-surface p-3 text-sm leading-relaxed shadow-sm outline-none transition-colors placeholder:text-zinc-400 focus:border-accent focus:ring-2 focus:ring-accent/20"
+                  className="w-full resize-y rounded-md border border-line bg-surface p-3 text-sm leading-relaxed outline-none transition-[border-color,box-shadow] placeholder:text-faint focus:border-accent focus:ring-2 focus:ring-accent/20"
                 />
-                <div className="mt-3 flex items-center justify-end gap-3">
+                <div className="mt-3 flex items-center justify-end gap-4">
                   <button
                     type="button"
                     onClick={() => {
                       setRefineOpen(false);
                       setRefineText("");
                     }}
-                    className="text-sm font-medium text-zinc-500 transition-colors hover:text-zinc-700"
+                    className="text-sm font-medium text-muted transition-colors hover:text-foreground"
                   >
                     Cancel
                   </button>
@@ -911,7 +942,7 @@ export default function Home() {
                     type="button"
                     onClick={handleRefine}
                     disabled={refineText.trim().length === 0}
-                    className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white shadow-card transition-all hover:bg-accent-strong active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Regenerate list
                   </button>
@@ -925,23 +956,25 @@ export default function Home() {
               const schools = lists[bucket];
               const meta = BUCKET_META[bucket];
               return (
-                <section key={bucket} aria-label={meta.title} className="mt-8">
-                  <div className="flex items-baseline gap-3 border-b border-zinc-200 pb-2">
-                    <h3 className="text-sm font-semibold uppercase tracking-widest text-accent">
-                      {meta.title}
-                    </h3>
-                    <span className="text-sm text-zinc-500">{meta.note}</span>
-                    <span className="ml-auto shrink-0 text-xs text-zinc-400">
-                      {schools.length}{" "}
-                      {schools.length === 1 ? "school" : "schools"}
-                    </span>
+                <section key={bucket} aria-label={meta.title} className="mt-10">
+                  <div className="border-b border-line pb-3">
+                    <div className="flex items-baseline justify-between gap-4">
+                      <h3 className="font-display text-2xl tracking-tight">
+                        {meta.title}
+                      </h3>
+                      <span className="shrink-0 rounded-full bg-accent-soft px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] tabular-nums text-accent-strong">
+                        {schools.length}{" "}
+                        {schools.length === 1 ? "school" : "schools"}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-sm text-muted">{meta.note}</p>
                   </div>
                   {schools.length === 0 ? (
-                    <p className="mt-3 text-sm text-zinc-400">
+                    <p className="mt-4 text-sm text-faint">
                       No schools left in this bucket.
                     </p>
                   ) : (
-                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    <div className="mt-4 grid gap-4 md:grid-cols-2">
                       {schools.map((scored) => (
                         <SchoolCard
                           key={scored.college.unitId}
@@ -957,7 +990,7 @@ export default function Home() {
               );
             })}
 
-            <footer className="mt-10 border-t border-zinc-200 pt-4 text-xs text-zinc-400">
+            <footer className="mt-14 border-t border-line pt-4 text-xs text-faint">
               Data: US Dept of Education College Scorecard
             </footer>
           </div>
