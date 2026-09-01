@@ -22,7 +22,7 @@ counselor text -> Gemini parse (structured output) -> typed StudentProfile
 
 ## Run it
 
-Live: https://REPLACED-AT-DEPLOY.vercel.app
+Live: https://nerd-apply-takehome.vercel.app
 
 Local:
 
