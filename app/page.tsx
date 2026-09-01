@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import DownloadButton from "@/components/DownloadButton";
 import HistoryPanel from "@/components/HistoryPanel";
+import PdfPreview from "@/components/PdfPreview";
 import { sampleReport } from "@/lib/fixtures";
 import {
   appendVersion,
@@ -173,9 +174,9 @@ function profileChips(profile: StudentProfile): string[] {
   return chips;
 }
 
-function formatPoints(points: number): string {
-  return points >= 0 ? `+${points}` : `${points}`;
-}
+// A component at or above this many points shaped the placement enough to
+// deserve the highlighted treatment on its tag.
+const COMPONENT_HIGHLIGHT_AT = 20;
 
 async function readApiError(res: Response): Promise<string> {
   try {
@@ -212,6 +213,63 @@ function makeLocalVersion(
     createdAt: new Date().toISOString(),
     isFinal: false,
   };
+}
+
+// ---------- version diffing (pure, client-side, from stored versions) ----------
+
+interface DiffEntry {
+  unitId: number;
+  name: string;
+}
+
+interface MovedEntry extends DiffEntry {
+  from: Bucket;
+  to: Bucket;
+}
+
+interface VersionDiff {
+  added: DiffEntry[];
+  removed: DiffEntry[];
+  moved: MovedEntry[];
+}
+
+function indexReportSchools(
+  report: Report
+): Map<number, { name: string; bucket: Bucket }> {
+  const map = new Map<number, { name: string; bucket: Bucket }>();
+  for (const bucket of BUCKET_ORDER) {
+    for (const scored of report[bucket]) {
+      map.set(scored.college.unitId, { name: scored.college.name, bucket });
+    }
+  }
+  return map;
+}
+
+function diffReports(previous: Report, current: Report): VersionDiff {
+  const prevMap = indexReportSchools(previous);
+  const currMap = indexReportSchools(current);
+  const added: DiffEntry[] = [];
+  const removed: DiffEntry[] = [];
+  const moved: MovedEntry[] = [];
+  for (const [unitId, school] of currMap) {
+    const before = prevMap.get(unitId);
+    if (before === undefined) {
+      added.push({ unitId, name: school.name });
+    } else if (before.bucket !== school.bucket) {
+      moved.push({
+        unitId,
+        name: school.name,
+        from: before.bucket,
+        to: school.bucket,
+      });
+    }
+  }
+  for (const [unitId, school] of prevMap) {
+    if (!currMap.has(unitId)) {
+      removed.push({ unitId, name: school.name });
+    }
+  }
+  return { added, removed, moved };
 }
 
 // ---------- small presentational components ----------
@@ -422,12 +480,12 @@ function SchoolCard({ scored, onRemove }: SchoolCardProps) {
             key={component.label}
             title={component.detail}
             className={
-              component.label === "Story fit"
-                ? "inline-flex items-center gap-1 rounded border border-accent/30 bg-accent-soft/60 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-accent-strong"
-                : "inline-flex items-center gap-1 rounded border border-line px-1.5 py-0.5 text-[11px] tabular-nums text-faint"
+              component.points >= COMPONENT_HIGHLIGHT_AT
+                ? "inline-flex items-center rounded border border-accent/30 bg-accent-soft/60 px-1.5 py-0.5 text-[11px] font-medium text-accent-strong"
+                : "inline-flex items-center rounded border border-line px-1.5 py-0.5 text-[11px] text-faint"
             }
           >
-            {component.label} {formatPoints(component.points)}
+            {component.label}
           </span>
         ))}
       </div>
@@ -480,6 +538,7 @@ export default function Home() {
   const [versionIndex, setVersionIndex] = useState(0);
   const [refineOpen, setRefineOpen] = useState(false);
   const [refineText, setRefineText] = useState("");
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   useEffect(() => {
     setStudents(listStudents());
@@ -730,6 +789,7 @@ export default function Home() {
     setVersionIndex(0);
     setRefineOpen(false);
     setRefineText("");
+    setPreviewOpen(false);
     setStudents(listStudents());
   }
 
@@ -760,6 +820,20 @@ export default function Home() {
   const finalVersionIndex = versions.findIndex((version) => version.isFinal);
   const displayedVersion =
     versionIndex < versions.length ? versions[versionIndex] : undefined;
+
+  // Compares the displayed version against the one before it, straight from
+  // the versions already in state. Null on v1, so the strip never renders.
+  const versionDiff: VersionDiff | null = useMemo(() => {
+    if (versionIndex < 1) {
+      return null;
+    }
+    const current = versions[versionIndex];
+    const previous = versions[versionIndex - 1];
+    if (current === undefined || previous === undefined) {
+      return null;
+    }
+    return diffReports(previous.report, current.report);
+  }, [versions, versionIndex]);
 
   return (
     <div className="flex flex-1 flex-col">
@@ -928,6 +1002,14 @@ export default function Home() {
                 </div>
                 <button
                   type="button"
+                  onClick={() => setPreviewOpen((open) => !open)}
+                  aria-expanded={previewOpen}
+                  className="mt-3 w-full text-center text-[13px] font-medium text-muted transition-colors hover:text-foreground"
+                >
+                  {previewOpen ? "Hide preview" : "Preview report"}
+                </button>
+                <button
+                  type="button"
                   onClick={handleStartOver}
                   className="mt-3 w-full text-center text-[13px] font-medium text-muted transition-colors hover:text-foreground"
                 >
@@ -1058,6 +1140,57 @@ export default function Home() {
               </aside>
 
               <div className="mt-12 min-w-0 lg:mt-0">
+
+            {versionDiff !== null && (
+              <section
+                aria-label={`Changes from v${versionIndex}`}
+                className="mb-8 rounded-md border border-line bg-surface p-4 shadow-card"
+              >
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-faint">
+                  Changes from v{versionIndex}
+                </p>
+                {versionDiff.added.length === 0 &&
+                versionDiff.removed.length === 0 &&
+                versionDiff.moved.length === 0 ? (
+                  <p className="mt-2 text-sm text-muted">
+                    No school changes from v{versionIndex}.
+                  </p>
+                ) : (
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {versionDiff.added.map((entry) => (
+                      <span
+                        key={`added-${entry.unitId}`}
+                        className="inline-flex items-center rounded border border-accent/30 bg-accent-soft/60 px-2 py-0.5 text-xs font-medium text-accent-strong"
+                      >
+                        + {entry.name}
+                      </span>
+                    ))}
+                    {versionDiff.removed.map((entry) => (
+                      <span
+                        key={`removed-${entry.unitId}`}
+                        className="inline-flex items-center rounded border border-line px-2 py-0.5 text-xs text-faint"
+                      >
+                        -&nbsp;<span className="line-through">{entry.name}</span>
+                      </span>
+                    ))}
+                    {versionDiff.moved.map((entry) => (
+                      <span
+                        key={`moved-${entry.unitId}`}
+                        className="inline-flex items-center rounded border border-line px-2 py-0.5 text-xs text-muted"
+                      >
+                        {entry.name}: {entry.from} to {entry.to}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+
+            {previewOpen && (
+              <div className="mb-8">
+                <PdfPreview report={report} />
+              </div>
+            )}
 
             {BUCKET_ORDER.map((bucket) => {
               const schools = lists[bucket];

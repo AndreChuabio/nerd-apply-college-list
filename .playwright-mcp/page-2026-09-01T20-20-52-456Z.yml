@@ -1,0 +1,37 @@
+- generic [active] [ref=f9e1]:
+  - generic [ref=f9e2]:
+    - banner [ref=f9e3]:
+      - button "College List Builder home" [ref=f9e5]:
+        - generic [ref=f9e7]: College List Builder
+    - main [ref=f9e8]:
+      - generic [ref=f9e405]:
+        - generic [ref=f9e406]:
+          - heading "Building the list" [level=1] [ref=f9e407]
+          - paragraph [ref=f9e408]: This usually takes a few seconds.
+        - list [ref=f9e413]:
+          - listitem [ref=f9e414]:
+            - generic [ref=f9e420]:
+              - generic [ref=f9e421]: Reading the student
+              - generic [ref=f9e422]: "01"
+          - listitem [ref=f9e423]:
+            - generic [ref=f9e427]:
+              - generic [ref=f9e428]: Matching against real data
+              - generic [ref=f9e429]: "02"
+          - listitem [ref=f9e430]:
+            - generic [ref=f9e433]:
+              - generic [ref=f9e434]: Writing the list
+              - generic [ref=f9e435]: "03"
+        - region "Parsed student profile" [ref=f9e437]:
+          - generic [ref=f9e438]:
+            - heading "Student profile" [level=2] [ref=f9e439]
+            - generic [ref=f9e440]: Parsed profile
+          - generic [ref=f9e441]:
+            - generic [ref=f9e442]: GPA 3.8
+            - generic [ref=f9e443]: SAT 1400
+            - generic [ref=f9e444]: Business
+            - generic [ref=f9e445]: "Home: NJ"
+            - generic [ref=f9e446]: Near home
+            - generic [ref=f9e447]: Financial aid
+          - paragraph [ref=f9e448]: varsity soccer captain hoping to play in college · obsessed with finance and the stock market
+  - button "Open Next.js Dev Tools" [ref=f9e68] [cursor=pointer]
+  - alert [ref=f9e72]

@@ -56,7 +56,7 @@ const STORY_FIT_WEIGHT = 3;
 // Below this the signal is not worth a line in the report. Showing "Story fit
 // +6" next to a lukewarm sentence adds noise to every card instead of marking
 // the schools where the story genuinely lines up.
-const STORY_FIT_VISIBLE_AT = 6;
+const STORY_FIT_VISIBLE_AT = 4;
 const STORY_FIT_LABEL = "Story fit";
 
 type BucketedColleges = Record<Bucket, ScoredCollege[]>;
