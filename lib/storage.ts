@@ -186,6 +186,38 @@ export function appendVersion(
   return writeAll(students) ? updated : null;
 }
 
+// Renames a student: updates the history label and stamps the name onto the
+// profile of every stored version, so the PDF header, filename, and email
+// subject all pick it up regardless of which version is open.
+export function renameStudent(
+  studentId: string,
+  name: string
+): StoredStudent | null {
+  const trimmed = name.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+  const students = readAll();
+  const index = students.findIndex((student) => student.id === studentId);
+  const existing = index >= 0 ? students[index] : undefined;
+  if (existing === undefined) {
+    return null;
+  }
+  const updated: StoredStudent = {
+    ...existing,
+    label: trimmed,
+    versions: existing.versions.map((version) => ({
+      ...version,
+      report: {
+        ...version.report,
+        profile: { ...version.report.profile, name: trimmed },
+      },
+    })),
+  };
+  students[index] = updated;
+  return writeAll(students) ? updated : null;
+}
+
 // Toggles the final flag on one version. Setting a version final clears the
 // flag on every other version of the same student; toggling the current final
 // version off leaves the student with no final version.

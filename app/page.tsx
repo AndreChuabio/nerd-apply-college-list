@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import DownloadButton from "@/components/DownloadButton";
+import EmailButton from "@/components/EmailButton";
 import HistoryPanel from "@/components/HistoryPanel";
 import PdfPreview from "@/components/PdfPreview";
 import { sampleReport } from "@/lib/fixtures";
@@ -11,6 +12,7 @@ import {
   getStudent,
   listStudents,
   markFinal,
+  renameStudent,
   saveNewStudent,
 } from "@/lib/storage";
 import type { StoredStudent, StoredVersion } from "@/lib/storage";
@@ -539,8 +541,13 @@ export default function Home() {
   const [refineOpen, setRefineOpen] = useState(false);
   const [refineText, setRefineText] = useState("");
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [nameEditOpen, setNameEditOpen] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
 
   useEffect(() => {
+    // localStorage is unavailable during SSR, so history must hydrate in an
+    // effect; the initial empty render and this single set are intentional.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setStudents(listStudents());
   }, []);
 
@@ -580,6 +587,35 @@ export default function Home() {
       target: generated.target,
       likely: generated.likely,
     });
+    setNameEditOpen(false);
+  }
+
+  // Sets or corrects the student's name on the displayed report, every stored
+  // version, and the history label, so the PDF header, filename, and email
+  // subject all agree.
+  function handleRenameStudent(): void {
+    const trimmed = nameDraft.trim();
+    if (trimmed.length === 0) {
+      setNameEditOpen(false);
+      return;
+    }
+    setProfile((current) =>
+      current === null ? current : { ...current, name: trimmed }
+    );
+    setVersions((current) =>
+      current.map((version) => ({
+        ...version,
+        report: {
+          ...version.report,
+          profile: { ...version.report.profile, name: trimmed },
+        },
+      }))
+    );
+    if (currentStudentId !== null) {
+      renameStudent(currentStudentId, trimmed);
+      setStudents(listStudents());
+    }
+    setNameEditOpen(false);
   }
 
   // Shared parse-then-report pipeline behind both generate and refine.
@@ -996,9 +1032,48 @@ export default function Home() {
                     ? ` for ${report.profile.name}`
                     : ""}
                 </h1>
+                {nameEditOpen ? (
+                  <div className="mt-2 flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={nameDraft}
+                      onChange={(event) => setNameDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") handleRenameStudent();
+                        if (event.key === "Escape") setNameEditOpen(false);
+                      }}
+                      placeholder="Student name"
+                      autoFocus
+                      className="w-full rounded-md border border-line bg-white px-3 py-1.5 text-sm text-foreground outline-none focus:border-accent"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleRenameStudent}
+                      className="shrink-0 text-[13px] font-semibold text-accent transition-colors hover:text-accent-strong"
+                    >
+                      Save
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNameDraft(report.profile.name ?? "");
+                      setNameEditOpen(true);
+                    }}
+                    className="mt-2 text-left text-[13px] font-medium text-muted transition-colors hover:text-foreground"
+                  >
+                    {report.profile.name !== null
+                      ? "Rename student"
+                      : "Set student name"}
+                  </button>
+                )}
 
                 <div className="mt-6 [&>div]:items-stretch [&_button]:w-full [&_button]:justify-center [&_button]:py-3 [&_button]:text-[15px]">
                   <DownloadButton report={report} />
+                </div>
+                <div className="mt-3">
+                  <EmailButton report={report} />
                 </div>
                 <button
                   type="button"
