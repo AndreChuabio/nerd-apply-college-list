@@ -39,3 +39,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Workspace instruction files and local debug artifacts
+CLAUDE.md
+AGENTS.md
+.playwright-mcp/
+.smoke.json
+.claude/

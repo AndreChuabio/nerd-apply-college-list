@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node --import tsx --test lib/match.test.ts && tsx -e \"import('./lib/guardrail.ts').then(m => m.selfTestGuardrail())\""
   },
   "dependencies": {
     "@google/genai": "^2.20.0",
