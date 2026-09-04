@@ -64,7 +64,7 @@ The three example prompts on the home page exercise different paths: John Smith 
 ## Decisions and tradeoffs
 
 - No database: reports are JSON; browser storage covers the single-counselor MVP. MongoDB keyed by district is the real path.
-- No email sending: the brief says the PDF is printed and hand-delivered.
+- No outbound email infrastructure: the brief says the PDF is printed and hand-delivered. The email button prepares a draft in the counselor's own mail client; server-side sending belongs behind a district-verified domain.
 - For-profit colleges excluded; warm climate is a state list, not climate data; distance is adjacency, not miles. All stated in-component where relevant.
 - Model pinned to gemini-3.6-flash (new keys 404 on 2.5-flash), overridable via GEMINI_MODEL. Thinking turned down deliberately: rationale latency dropped 21s to 5s with no quality change.
 - Bucket sizes are fixed at up to four; unused slots are not redistributed to other buckets — known, documented, judged too risky to change pre-submission.
